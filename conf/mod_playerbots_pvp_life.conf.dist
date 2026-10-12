@@ -1,0 +1,569 @@
+###################################################################################################
+# Playerbots PvP Life Module Configuration
+###################################################################################################
+
+[worldserver]
+
+#
+#   PvPLife.Enable
+#       Description: Master switch to enable or disable the PvP Life module.
+#       Default:     1 (Enabled)
+#
+PvPLife.Enable = 1
+
+#
+#   PvPLife.Debug
+#       Description: Output detailed server debug logs.
+#       Default:     0 (Disabled)
+#
+PvPLife.Debug = 0
+
+#
+#   PvPLife.Announce
+#       Description: Broadcast system announcements to the entire server when activities start or end.
+#                    Recommended disabled for a natural player-like atmosphere.
+#       Default:     0 (Disabled)
+#
+PvPLife.Announce = 0
+
+#
+#   PvPLife.StartupDelaySeconds
+#       Description: Delay in seconds after worldserver startup before the module begins activities.
+#       Default:     90
+#
+PvPLife.StartupDelaySeconds = 90
+
+#
+#   PvPLife.TickSeconds
+#       Description: Activity management tick interval in seconds.
+#       Default:     20
+#
+PvPLife.TickSeconds = 20
+
+#
+#   PvPLife.Events.MaxActive
+#       Description: Overall ceiling for active concurrent PvP events across all categories.
+#                    Tuned to 4 for conservative world bot retention.
+#       Default:     4
+#
+PvPLife.Events.MaxActive = 4
+
+###################################################################################################
+# Bot Selection and Candidate Filtering
+###################################################################################################
+
+#
+#   PvPLife.Bots.RequireBotEligibility
+#       Description: Mandatory safety filter ensuring only Playerbots are ever selected.
+#                    If disabled, the module refuses to start.
+#       Default:     1 (Enabled)
+#
+PvPLife.Bots.RequireBotEligibility = 1
+
+#
+#   PvPLife.Bots.UsePlayerbotConfig
+#       Description: Import account prefix and login delay settings from Playerbots configuration
+#                    (checks modern Playerbots.* keys first with fallback to legacy AiPlayerbot.*).
+#       Default:     1 (Enabled)
+#
+PvPLife.Bots.UsePlayerbotConfig = 1
+
+#
+#   PvPLife.Bots.AccountPrefix
+#       Description: Account prefix for identifying random bots. "auto" imports from mod-playerbots.
+#       Default:     "auto"
+#
+PvPLife.Bots.AccountPrefix = "auto"
+
+#
+#   PvPLife.Bots.AccountMin / PvPLife.Bots.AccountMax
+#       Description: Restrict candidate bot accounts by numeric ID range. 0 = unrestricted.
+#       Default:     0, 0
+#
+PvPLife.Bots.AccountMin = 0
+PvPLife.Bots.AccountMax = 0
+
+#
+#   PvPLife.Bots.AccountFilterMode
+#       Description: Matching mode when both account range and prefix are specified.
+#                    "legacy_any" = matches range OR prefix.
+#                    "all"        = must match BOTH range and prefix.
+#       Default:     "legacy_any"
+#
+PvPLife.Bots.AccountFilterMode = "legacy_any"
+
+#
+#   PvPLife.Bots.QueryLimit
+#       Description: Maximum number of character candidates queried during candidate evaluation.
+#                    Set to 0 for dynamic automatic scaling based on live online bot counts (clamped 100-1500).
+#                    Fixed values are clamped between 50 and 5000.
+#       Default:     500
+#
+PvPLife.Bots.QueryLimit = 500
+
+#
+#   PvPLife.Bots.MinOnlineRequired
+#       Description: Minimum ready population required across both sides to start an activity.
+#       Default:     3
+#
+PvPLife.Bots.MinOnlineRequired = 3
+
+#
+#   PvPLife.Bots.GlobalMinLevel
+#       Description: Lowest level allowed for world skirmishes. Prevents lowbies from being dragged to war.
+#       Default:     20
+#
+PvPLife.Bots.GlobalMinLevel = 20
+
+#
+#   PvPLife.Bots.SkipGrouped
+#       Description: Do not borrow bots participating in party, raid, or dungeon groups with real players.
+#       Default:     1 (Enabled)
+#
+PvPLife.Bots.SkipGrouped = 1
+
+#
+#   PvPLife.Bots.RespectPlayerbotActivity
+#       Description: Respect Playerbots internal activity filters.
+#       Default:     0 (Disabled)
+#
+PvPLife.Bots.RespectPlayerbotActivity = 0
+
+#
+#   PvPLife.Bots.AllowPartialTeams
+#       Description: Start activities with fewer bots than target if at least MinimumPerSide are ready.
+#       Default:     1 (Enabled)
+#
+PvPLife.Bots.AllowPartialTeams = 1
+
+#
+#   PvPLife.Bots.MinimumPerSide
+#       Description: Minimum bots required per side for partial teams.
+#       Default:     1
+#
+PvPLife.Bots.MinimumPerSide = 1
+
+#
+#   PvPLife.Bots.MaxPerSide
+#       Description: Maximum ceiling of bots assigned per faction per event.
+#       Default:     100
+#
+PvPLife.Bots.MaxPerSide = 100
+
+#
+#   PvPLife.Bots.ReturnAfterActivity
+#       Description: Return participating bots to their original locations when the activity ends.
+#       Default:     1 (Enabled)
+#
+PvPLife.Bots.ReturnAfterActivity = 1
+
+###################################################################################################
+# Movement and Engagement
+###################################################################################################
+
+#
+#   PvPLife.Movement.TeleportOnArrival
+#       Description: Teleport bots directly to the staging rally point upon arrival.
+#       Default:     1 (Enabled)
+#
+PvPLife.Movement.TeleportOnArrival = 1
+
+#
+#   PvPLife.Movement.UseMovePoint
+#       Description: Advance bots toward target combat point using MotionMaster MovePoint.
+#       Default:     1 (Enabled)
+#
+PvPLife.Movement.UseMovePoint = 1
+
+#
+#   PvPLife.Movement.HardTeleportToTarget
+#       Description: Hard teleport attackers directly to target point instead of walking.
+#       Default:     0 (Disabled)
+#
+PvPLife.Movement.HardTeleportToTarget = 0
+
+#
+#   PvPLife.Movement.PositionJitter
+#       Description: Random offset range (in yards) added to positions to prevent stacking.
+#       Default:     10
+#
+PvPLife.Movement.PositionJitter = 10
+
+#
+#   PvPLife.Movement.ArrivalStaggerMinSeconds / ArrivalStaggerMaxSeconds
+#       Description: Delay range in seconds for staggered bot arrivals.
+#       Default:     2, 12
+#
+PvPLife.Movement.ArrivalStaggerMinSeconds = 2
+PvPLife.Movement.ArrivalStaggerMaxSeconds = 12
+
+#
+#   PvPLife.Movement.MoveAfterArrivalMinSeconds / MoveAfterArrivalMaxSeconds
+#       Description: Delay range in seconds before advancing toward combat target.
+#       Default:     6, 20
+#
+PvPLife.Movement.MoveAfterArrivalMinSeconds = 6
+PvPLife.Movement.MoveAfterArrivalMaxSeconds = 20
+
+#
+#   PvPLife.Strategies.Enable
+#       Description: Enable dynamic application of native Playerbots PvP combat strategies.
+#       Default:     1 (Enabled)
+#
+PvPLife.Strategies.Enable = 1
+
+#
+#   PvPLife.Combat.ForcePvpFlag
+#       Description: Force PvP flag on participating bots during events.
+#       Default:     1 (Enabled)
+#
+PvPLife.Combat.ForcePvpFlag = 1
+
+#
+#   PvPLife.Combat.ForceAttackOnEngage
+#       Description: Automatically initiate attack against opposing bots upon reaching combat area.
+#       Default:     1 (Enabled)
+#
+PvPLife.Combat.ForceAttackOnEngage = 1
+
+#
+#   PvPLife.Combat.EngageAfterMoveSeconds
+#       Description: Seconds after advance movement before initiating attack.
+#       Default:     4
+#
+PvPLife.Combat.EngageAfterMoveSeconds = 4
+
+#
+#   PvPLife.Combat.EngageRetrySeconds
+#       Description: Retry interval in seconds if target engagement fails initially.
+#       Default:     5
+#
+PvPLife.Combat.EngageRetrySeconds = 5
+
+#
+#   PvPLife.Combat.EngageMaxRetries
+#       Description: Maximum engagement retry attempts before giving up.
+#       Default:     12
+#
+PvPLife.Combat.EngageMaxRetries = 12
+
+#
+#   PvPLife.Strategies.Combat / NonCombat / DuelNonCombat
+#       Description: Strategy expressions assigned to bots during combat, roaming, and duels.
+#
+PvPLife.Strategies.Combat = "+pvp,+boost,+dps debuff,-passive,-stay"
+PvPLife.Strategies.NonCombat = "+pvp,+boost,-passive,-stay"
+PvPLife.Strategies.DuelNonCombat = "+duel,+pvp,+boost,+stay,-follow,-passive,-grind"
+
+###################################################################################################
+# Persistent World PvP
+###################################################################################################
+
+#
+#   PvPLife.World.AlwaysActive
+#       Description: Ensure outdoor PvP is actively running in at least one zone whenever possible.
+#       Default:     1 (Enabled)
+#
+PvPLife.World.AlwaysActive = 1
+
+#
+#   PvPLife.World.MinActiveHotspots / MaxActiveHotspots
+#       Description: Number of normal outdoor PvP hotspots to keep active concurrently.
+#       Default:     1, 3
+#
+PvPLife.World.MinActiveHotspots = 1
+PvPLife.World.MaxActiveHotspots = 3
+
+#
+#   PvPLife.World.RandomStartChance
+#       Description: Chance (percentage) per management tick to start an additional activity.
+#       Default:     35
+#
+PvPLife.World.RandomStartChance = 35
+
+###################################################################################################
+# Duel Zones
+###################################################################################################
+
+#
+#   PvPLife.Duel.Enable
+#       Description: Enable persistent capital gate and wilderness duel zones.
+#       Default:     1 (Enabled)
+#
+PvPLife.Duel.Enable = 1
+
+#
+#   PvPLife.Duel.AlwaysActive
+#       Description: Keep bots persistently stationed in active duel zones.
+#       Default:     1 (Enabled)
+#
+PvPLife.Duel.AlwaysActive = 1
+
+#
+#   PvPLife.Duel.SpellId
+#       Description: Classic duel challenge spell ID (7266).
+#       Default:     7266
+#
+PvPLife.Duel.SpellId = 7266
+
+#
+#   PvPLife.Duel.PairLimit
+#       Description: Maximum number of bot-vs-bot duel pairs scheduled concurrently.
+#       Default:     12
+#
+PvPLife.Duel.PairLimit = 12
+PvPLife.Duel.PairDelayMinSeconds = 5
+PvPLife.Duel.PairDelayMaxSeconds = 18
+
+#
+#   PvPLife.Duel.LeashRadius
+#       Description: Distance in yards to tether idle duel bots to the arena center.
+#       Default:     40
+#
+PvPLife.Duel.LeashRadius = 40
+PvPLife.Duel.GuardIntervalMs = 1000
+
+#
+#   PvPLife.Duel.ChallengeRealPlayers
+#       Description: Allow bots in duel zones to challenge nearby real players.
+#       Default:     1 (Enabled)
+#
+PvPLife.Duel.ChallengeRealPlayers = 1
+PvPLife.Duel.PlayerChallengeChance = 25
+PvPLife.Duel.PlayerScanRadius = 55
+PvPLife.Duel.MaxLevelDifference = 5
+PvPLife.Duel.PlayerChallengeCooldownSeconds = 900
+PvPLife.Duel.BotChallengeCooldownSeconds = 180
+PvPLife.Duel.BotVsBotCooldownSeconds = 45
+PvPLife.Duel.BotVsBotMaxLevelDifference = 5
+
+###################################################################################################
+# For the Horde / For the Alliance Campaigns
+###################################################################################################
+
+PvPLife.ForTheHorde.Enable = 1
+PvPLife.ForTheAlliance.Enable = 1
+PvPLife.FactionCampaign.ChancePerTick = 12
+PvPLife.FactionCampaign.GlobalCooldownSeconds = 3600
+
+###################################################################################################
+# Natural Bot Chatter
+###################################################################################################
+
+PvPLife.BotChat.Enable = 0
+PvPLife.BotChat.YellChance = 0
+PvPLife.BotChat.WorldChance = 0
+
+###################################################################################################
+# Reactive Raid Defense
+###################################################################################################
+
+#
+#   PvPLife.ReactiveRaidResponse.Enable
+#       Description: Deploy reactive bot defenders when a real-player-led outdoor raid of the opposite
+#                    faction is detected.
+#       Default:     1 (Enabled)
+#
+PvPLife.ReactiveRaidResponse.Enable = 1
+PvPLife.ReactiveRaidResponse.AllianceEnable = 1
+PvPLife.ReactiveRaidResponse.HordeEnable = 1
+
+#
+#   PvPLife.ReactiveRaidResponse.MinGroupSize
+#       Description: Minimum number of raid group members to trigger a reactive response.
+#       Default:     20
+#
+PvPLife.ReactiveRaidResponse.MinGroupSize = 20
+
+#
+#   PvPLife.ReactiveRaidResponse.MaxResponders
+#       Description: Maximum number of bot defenders recruited for a reactive response.
+#                    Tuned to 25 so defenders mount a massive counter-strike without exhausting high-level bots.
+#       Default:     25
+#
+PvPLife.ReactiveRaidResponse.MaxResponders = 25
+
+#
+#   PvPLife.ReactiveRaidResponse.LevelMode
+#       Description: Level matching mode for defenders.
+#                    "raid"  = dynamically matches invading group's level profile.
+#                    "fixed" = recruits defenders at PvPLife.ReactiveRaidResponse.FixedLevel.
+#       Default:     "raid"
+#
+PvPLife.ReactiveRaidResponse.LevelMode = "raid"
+PvPLife.ReactiveRaidResponse.FixedLevel = 60
+PvPLife.ReactiveRaidResponse.MaxLevelDifference = 5
+
+#
+#   PvPLife.ReactiveRaidResponse.LoginOfflineBots
+#       Description: Optionally wake existing offline random bots if online capacity is insufficient.
+#       Default:     0 (Disabled)
+#
+PvPLife.ReactiveRaidResponse.LoginOfflineBots = 0
+PvPLife.ReactiveRaidResponse.LoginDelaySeconds = 20
+PvPLife.ReactiveRaidResponse.LoginTimeoutSeconds = 60
+PvPLife.ReactiveRaidResponse.MaxConcurrentLogins = 4
+
+PvPLife.ReactiveRaidResponse.CooldownSeconds = 1800
+PvPLife.ReactiveRaidResponse.DurationMinutes = 20
+
+# Formation staging geometry
+PvPLife.ReactiveRaidResponse.RallyDistance = 120.0
+PvPLife.ReactiveRaidResponse.LaneSpacing = 4.0
+PvPLife.ReactiveRaidResponse.FormationColumns = 9
+PvPLife.ReactiveRaidResponse.AdvanceDistance = 25.0
+
+###################################################################################################
+# Conservative Balanced Population Budget
+###################################################################################################
+
+#
+#   PvPLife.Population.Enable
+#       Description: Enable shared borrowing budget calculations.
+#       Default:     1 (Enabled)
+#
+PvPLife.Population.Enable = 1
+
+#
+#   PvPLife.Population.BudgetMode
+#       Description: Budget calculation mode: "percentage" or "fixed".
+#       Default:     "percentage"
+#
+PvPLife.Population.BudgetMode = "percentage"
+PvPLife.Population.FixedCount = 100
+PvPLife.Population.BorrowPercent = 10
+
+# Global ceiling across all PvP activities combined.
+# Set to 0 for uncapped dynamic mode (budget scales purely with live world bots * BorrowPercent).
+# Tuned conservatively to 120 max total bots across all activities on a 1,000-bot server.
+PvPLife.Population.MaxTotal = 120
+
+PvPLife.Population.DemandMode = "hybrid"
+PvPLife.Population.BaselinePercent = 20
+PvPLife.Population.BurstGraceSeconds = 180
+PvPLife.Population.MaxChangesPerTick = 3
+
+# Proportional Zone & Skirmish Scaling:
+# When enabled (1), zone min/max bot populations dynamically scale up or down based on
+# live active world bots relative to 1,000-bot baseline (2v2 skirmishes at low population,
+# expanding into full-scale 10v10+ battles during high server population).
+# Default: 1 (Enabled)
+PvPLife.Population.ProportionalZoneScaling = 1
+
+###################################################################################################
+# Cross-Module Harmony & Coexistence with mod-playerbots-city-life
+###################################################################################################
+
+#
+#   PvPLife.Compatibility.CityLife.EnableHarmony
+#       Description: Master switch for cross-module harmony with mod-playerbots-city-life.
+#                    Enables mutual anti-stealing reservation checks and system presence flags.
+#       Default:     1 (Enabled)
+#
+PvPLife.Compatibility.CityLife.EnableHarmony = 1
+
+#
+#   PvPLife.Compatibility.CityLife.RespectReservations
+#       Description: When enabled, PvP Life consults the shared PlayerbotsLife::ReservationRegistry
+#                    and never borrows, moves, or commands a bot reserved by City Life.
+#       Default:     1 (Enabled)
+#
+PvPLife.Compatibility.CityLife.RespectReservations = 1
+
+#
+#   PvPLife.Compatibility.CityLife.ExcludeCityLifeAccounts
+#       Description: Excludes bot accounts configured for City Life from PvP Life's optional
+#                    offline bot login queries.
+#       Default:     1 (Enabled)
+#
+PvPLife.Compatibility.CityLife.ExcludeCityLifeAccounts = 1
+
+#
+#   PvPLife.Compatibility.CityLife.IndependentHookProcessing
+#       Description: Ensures PvP Life player and world script hooks only inspect and modify
+#                    active PvP Life participants, allowing City Life hooks to execute freely.
+#       Default:     1 (Enabled)
+#
+PvPLife.Compatibility.CityLife.IndependentHookProcessing = 1
+
+###################################################################################################
+# Asynchronous Audit Logger
+###################################################################################################
+
+#
+#   PvPLife.Audit.Enable
+#       Description: Enable bounded asynchronous audit logging to file on a dedicated thread.
+#       Default:     1 (Enabled)
+#
+PvPLife.Audit.Enable = 1
+
+#
+#   PvPLife.Audit.FilePath
+#       Description: File path for audit log records.
+#       Default:     "Logs/pvplife_audit.log"
+#
+PvPLife.Audit.FilePath = "Logs/pvplife_audit.log"
+
+###################################################################################################
+# Per-Zone Populations
+###################################################################################################
+
+# Duel arenas (Stormwind & Orgrimmar gates, balanced alongside City Life)
+PvPLife.Zone.StormwindDuel.Enable = 1
+PvPLife.Zone.StormwindDuel.MinPopulation = 4
+PvPLife.Zone.StormwindDuel.MaxPopulation = 8
+PvPLife.Zone.OrgrimmarDuel.Enable = 1
+PvPLife.Zone.OrgrimmarDuel.MinPopulation = 4
+PvPLife.Zone.OrgrimmarDuel.MaxPopulation = 8
+
+# Stranglethorn Vale skirmishes (level 30-45 bracket)
+PvPLife.Zone.STV_Nesingwary.Enable = 1
+PvPLife.Zone.STV_Nesingwary.MinPopulation = 4
+PvPLife.Zone.STV_Nesingwary.MaxPopulation = 10
+PvPLife.Zone.STV_Gurubashi.Enable = 1
+PvPLife.Zone.STV_Gurubashi.MinPopulation = 4
+PvPLife.Zone.STV_Gurubashi.MaxPopulation = 10
+
+# Tanaris desert skirmish (level 40-52 bracket)
+PvPLife.Zone.Tanaris_Gadgetzan.Enable = 1
+PvPLife.Zone.Tanaris_Gadgetzan.MinPopulation = 4
+PvPLife.Zone.Tanaris_Gadgetzan.MaxPopulation = 10
+
+# Dark Portal battlegrounds (level 55-65 bracket)
+PvPLife.Zone.DarkPortal_Azeroth.Enable = 1
+PvPLife.Zone.DarkPortal_Azeroth.MinPopulation = 6
+PvPLife.Zone.DarkPortal_Azeroth.MaxPopulation = 12
+PvPLife.Zone.DarkPortal_Outland.Enable = 1
+PvPLife.Zone.DarkPortal_Outland.MinPopulation = 6
+PvPLife.Zone.DarkPortal_Outland.MaxPopulation = 12
+
+# Outland & Northrend hotspots (level 65-80 bracket)
+PvPLife.Zone.Shattrath_Outskirts.Enable = 1
+PvPLife.Zone.Shattrath_Outskirts.MinPopulation = 4
+PvPLife.Zone.Shattrath_Outskirts.MaxPopulation = 10
+PvPLife.Zone.K3_StormPeaks.Enable = 1
+PvPLife.Zone.K3_StormPeaks.MinPopulation = 4
+PvPLife.Zone.K3_StormPeaks.MaxPopulation = 10
+PvPLife.Zone.Wintergrasp.Enable = 1
+PvPLife.Zone.Wintergrasp.MinPopulation = 6
+PvPLife.Zone.Wintergrasp.MaxPopulation = 12
+
+# Lowbie starter perimeter skirmishes (level 5-15 bracket)
+PvPLife.Zone.Goldshire_Roaming.Enable = 1
+PvPLife.Zone.Goldshire_Roaming.MinPopulation = 3
+PvPLife.Zone.Goldshire_Roaming.MaxPopulation = 6
+PvPLife.Zone.Durotar_Roaming.Enable = 1
+PvPLife.Zone.Durotar_Roaming.MinPopulation = 3
+PvPLife.Zone.Durotar_Roaming.MaxPopulation = 6
+
+PvPLife.Zone.Orgrimmar_Zeppelin.Enable = 0
+PvPLife.Zone.Orgrimmar_Zeppelin.MinPopulation = 3
+PvPLife.Zone.Orgrimmar_Zeppelin.MaxPopulation = 8
+
+# Capital campaign assaults (level 60-80 bracket)
+PvPLife.Zone.ForTheHorde_Stormwind.Enable = 1
+PvPLife.Zone.ForTheHorde_Stormwind.MinPopulation = 6
+PvPLife.Zone.ForTheHorde_Stormwind.MaxPopulation = 14
+PvPLife.Zone.ForTheAlliance_Orgrimmar.Enable = 1
+PvPLife.Zone.ForTheAlliance_Orgrimmar.MinPopulation = 6
+PvPLife.Zone.ForTheAlliance_Orgrimmar.MaxPopulation = 14

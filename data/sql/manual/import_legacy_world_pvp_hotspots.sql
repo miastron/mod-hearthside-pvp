@@ -1,0 +1,62 @@
+-- Migration script: Import customized records from legacy playerbot_world_pvp_hotspot into pvp_life_zone
+-- Name-based conflict handling: existing pvp_life_zone records win (INSERT IGNORE).
+-- Safe and non-destructive: does NOT drop or delete legacy tables or user records.
+
+INSERT IGNORE INTO `pvp_life_zone` (
+  `name`,
+  `enabled`,
+  `activity_type`,
+  `attacker_team`,
+  `defender_team`,
+  `min_level`,
+  `max_level`,
+  `map_id`,
+  `rally_x`,
+  `rally_y`,
+  `rally_z`,
+  `rally_o`,
+  `target_x`,
+  `target_y`,
+  `target_z`,
+  `target_o`,
+  `attackers_min`,
+  `attackers_max`,
+  `defenders_min`,
+  `defenders_max`,
+  `duration_min`,
+  `duration_max`,
+  `weight`,
+  `cooldown_seconds`,
+  `last_start`,
+  `challenge_players`,
+  `bot_chat`
+)
+SELECT
+  `name`,
+  `enabled`,
+  IF(`attacker_team` = `defender_team` AND `attacker_team` != 2, 1, 0) AS `activity_type`, -- 1=Duel if same faction, else 0=Skirmish
+  `attacker_team`,
+  `defender_team`,
+  `min_level`,
+  `max_level`,
+  `map_id`,
+  `rally_x`,
+  `rally_y`,
+  `rally_z`,
+  `rally_o`,
+  `target_x`,
+  `target_y`,
+  `target_z`,
+  `target_o`,
+  `attackers_min`,
+  `attackers_max`,
+  `defenders_min`,
+  `defenders_max`,
+  `duration_min`,
+  `duration_max`,
+  `weight`,
+  `cooldown_seconds`,
+  `last_start`,
+  0 AS `challenge_players`,
+  0 AS `bot_chat`
+FROM `playerbot_world_pvp_hotspot`;
