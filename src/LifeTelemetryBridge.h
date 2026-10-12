@@ -18,11 +18,13 @@
 #include "WorldScript.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -80,17 +82,14 @@ namespace PlayerbotsLife
         out.reserve(data.size());
         for (std::size_t i = 0; i < data.size(); ++i)
         {
-            if (data[i] == '%' && i + 2 < data.size())
+            if (data[i] == '%' && i + 2 < data.size() &&
+                std::isxdigit(static_cast<unsigned char>(data[i + 1])) &&
+                std::isxdigit(static_cast<unsigned char>(data[i + 2])))
             {
                 char hex[3] = { data[i + 1], data[i + 2], '\0' };
-                char* end = nullptr;
-                long val = std::strtol(hex, &end, 16);
-                if (end == hex + 2)
-                {
-                    out.push_back(static_cast<char>(val));
-                    i += 2;
-                    continue;
-                }
+                out.push_back(static_cast<char>(std::strtol(hex, nullptr, 16)));
+                i += 2;
+                continue;
             }
             out.push_back(data[i]);
         }
@@ -110,6 +109,7 @@ namespace PlayerbotsLife
         {
             std::lock_guard<std::mutex> lock(_mutex);
             _subscribers.erase(guidLow);
+            _lastRequestMs.erase(guidLow);
         }
 
         static void SendTelemetryFrame(Player* player, std::string const& wireFrame)
@@ -142,8 +142,27 @@ namespace PlayerbotsLife
             }
 
             constexpr std::size_t MAX_WIRE_BYTES = 240;
-            std::size_t maxBodyPerChunk = 150;
+            // Longest part header: the single-part one with part/parts widened to 3 digits each.
+            std::size_t headerBytes = singleHeader.size() + 4;
+            if (headerBytes + 16 > MAX_WIRE_BYTES)
+                return; // no room for a body; dropping the whole message beats sending parts that can never reassemble
+            std::size_t maxBodyPerChunk = MAX_WIRE_BYTES - headerBytes;
+            // Never split a %XX escape across two parts.
             std::vector<std::string> chunks;
+            for (std::size_t offset = 0; offset < escaped.size();)
+            {
+                std::size_t len = std::min(maxBodyPerChunk, escaped.size() - offset);
+                if (offset + len < escaped.size())
+                {
+                    std::size_t pct = escaped.rfind('%', offset + len - 1);
+                    if (pct != std::string::npos && pct >= offset && pct + 3 > offset + len)
+                        len = pct - offset;
+                }
+                chunks.push_back(escaped.substr(offset, len));
+                offset += len;
+            }
+            if (chunks.size() > 999)
+                return;
             for (std::size_t offset = 0; offset < escaped.size(); offset += maxBodyPerChunk)
                 chunks.push_back(escaped.substr(offset, maxBodyPerChunk));
 
@@ -193,6 +212,23 @@ namespace PlayerbotsLife
             if (versionStr != "1")
                 return false;
 
+            // Every request is world-thread work any client can trigger: allow one per player per
+            // TELEMETRY_MIN_REQUEST_INTERVAL_MS, and cap what a PING may make us echo back.
+            constexpr uint32 TELEMETRY_MIN_REQUEST_INTERVAL_MS = 250;
+            constexpr std::size_t TELEMETRY_MAX_ECHO_FIELD = 32;
+            constexpr std::size_t TELEMETRY_MAX_ECHO_BODY = 512;
+            {
+                uint32 nowMs = static_cast<uint32>(GameTime::GetGameTimeMS().count());
+                std::lock_guard<std::mutex> lock(_mutex);
+                auto [last, inserted] = _lastRequestMs.try_emplace(player->GetGUID().GetCounter(), nowMs);
+                if (!inserted)
+                {
+                    if (nowMs - last->second < TELEMETRY_MIN_REQUEST_INTERVAL_MS)
+                        return true;
+                    last->second = nowMs;
+                }
+            }
+
             uint32 reqId = static_cast<uint32>(std::strtoul(reqStr.c_str(), nullptr, 10));
             std::string unescapedBody = UnescapeTelemetry(body);
 
@@ -200,18 +236,21 @@ namespace PlayerbotsLife
             {
                 std::string tier = (player->GetSession()->GetSecurity() > SEC_PLAYER) ? "admin" : "player";
                 std::string welcomePayload = "all|" + tier + "|" +
-                    std::to_string(GameTime::GetGameTimeMS()) + "|" +
-                    std::to_string(GameTime::GetGameTime());
+                    std::to_string(GameTime::GetGameTimeMS().count()) + "|" +
+                    std::to_string(GameTime::GetGameTime().count());
                 SendTelemetryMessage(player, "WELCOME", "main", reqId, "1", welcomePayload);
 
-                CooperationSnapshot snap = GetCooperationSnapshot(GameTimeSeconds());
+                CooperationSnapshot snap = GetCooperationSnapshot(static_cast<std::uint32_t>(GameTime::GetGameTime().count()));
                 std::string capPayload = BuildCapacityPayload(snap);
                 SendTelemetryMessage(player, "CAPACITY", "main", 0, "1", capPayload);
                 return true;
             }
             else if (kind == "PING")
             {
-                SendTelemetryMessage(player, "PONG", stream, reqId, session, unescapedBody);
+                if (session.size() > TELEMETRY_MAX_ECHO_FIELD || stream.size() > TELEMETRY_MAX_ECHO_FIELD ||
+                    unescapedBody.size() > TELEMETRY_MAX_ECHO_BODY)
+                    return true;
+                SendTelemetryMessage(player, "PONG", EscapeTelemetry(stream), reqId, EscapeTelemetry(session), unescapedBody);
                 return true;
             }
             else if (kind == "SUBSCRIBE")
@@ -220,7 +259,7 @@ namespace PlayerbotsLife
                     std::lock_guard<std::mutex> lock(_mutex);
                     _subscribers.insert(player->GetGUID().GetCounter());
                 }
-                CooperationSnapshot snap = GetCooperationSnapshot(GameTimeSeconds());
+                CooperationSnapshot snap = GetCooperationSnapshot(static_cast<std::uint32_t>(GameTime::GetGameTime().count()));
                 std::string capPayload = BuildCapacityPayload(snap);
                 SendTelemetryMessage(player, "CAPACITY", "main", reqId, "1", capPayload);
                 return true;
@@ -250,18 +289,22 @@ namespace PlayerbotsLife
                 activeSubs.assign(_subscribers.begin(), _subscribers.end());
             }
 
-            CooperationSnapshot snap = GetCooperationSnapshot(GameTimeSeconds());
+            CooperationSnapshot snap = GetCooperationSnapshot(static_cast<std::uint32_t>(GameTime::GetGameTime().count()));
             std::string capPayload = BuildCapacityPayload(snap);
 
             for (uint32 guidLow : activeSubs)
             {
-                Player* player = ObjectAccessor::FindPlayer(ObjectGuid::Create<HighGuid::Player>(guidLow));
-                if (!player || !player->IsInWorld())
+                // FindConnectedPlayer still finds a player mid-teleport (not in world), who keeps
+                // the subscription and just misses this frame; only a logged-out player is dropped.
+                Player* player = ObjectAccessor::FindConnectedPlayer(ObjectGuid::Create<HighGuid::Player>(guidLow));
+                if (!player)
                 {
                     std::lock_guard<std::mutex> lock(_mutex);
                     _subscribers.erase(guidLow);
                     continue;
                 }
+                if (!player->IsInWorld())
+                    continue;
                 SendTelemetryMessage(player, "CAPACITY", "main", 0, "1", capPayload);
             }
         }
@@ -269,23 +312,29 @@ namespace PlayerbotsLife
     private:
         LifeTelemetryBridge() = default;
 
+        // total|city|cityActive|cityProvisional|cityReleasing|pvp|pvpActive|pvpProvisional|pvpReleasing|free
+        // The registry does not know the size of the bot pool, so "free" stays 0; Artisans is not
+        // in the frame because the client's field layout has no slot for it.
         static std::string BuildCapacityPayload(CooperationSnapshot const& snap)
         {
+            constexpr std::size_t city = static_cast<std::size_t>(ReservationOwner::CityLife);
+            constexpr std::size_t pvp = static_cast<std::size_t>(ReservationOwner::PvPLife);
             uint32 freeCapacity = 0;
             return std::to_string(snap.TotalReserved) + "|" +
                    std::to_string(snap.CityLifeCount) + "|" +
-                   std::to_string(snap.ActiveCount) + "|" +
-                   std::to_string(snap.ProvisionalCount) + "|" +
-                   std::to_string(snap.ReleasingCount) + "|" +
+                   std::to_string(snap.OwnerActive[city]) + "|" +
+                   std::to_string(snap.OwnerProvisional[city]) + "|" +
+                   std::to_string(snap.OwnerReleasing[city]) + "|" +
                    std::to_string(snap.PvPLifeCount) + "|" +
-                   std::to_string(snap.ActiveCount) + "|" +
-                   std::to_string(snap.ProvisionalCount) + "|" +
-                   std::to_string(snap.ReleasingCount) + "|" +
+                   std::to_string(snap.OwnerActive[pvp]) + "|" +
+                   std::to_string(snap.OwnerProvisional[pvp]) + "|" +
+                   std::to_string(snap.OwnerReleasing[pvp]) + "|" +
                    std::to_string(freeCapacity);
         }
 
         std::mutex _mutex;
         std::unordered_set<uint32> _subscribers;
+        std::unordered_map<uint32, uint32> _lastRequestMs;
         uint32 _broadcastTimerMs{0};
     };
 

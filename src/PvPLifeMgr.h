@@ -11,6 +11,7 @@
 #include "AsyncCallbackProcessor.h"
 #include "QueryCallback.h"
 #include "Transaction.h"
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -22,6 +23,17 @@ class Field;
 
 namespace PvPLife
 {
+    // A playerbot's session, by account, whether or not mod-playerbots has
+    // attached its AI yet: it attaches after OnPlayerLogin, so ::IsRealPlayer()
+    // alone reads every bot logging in as a human. Stands in for the
+    // WorldSession::IsBot() this module was written against, which this core
+    // does not have.
+    bool IsBotSession(Player const* player);
+
+    // A person playing through the client: has a session, is not a bot account and has no
+    // PlayerbotAI attached. A player-owned alt bot is thus neither borrowable nor human.
+    bool IsHumanPlayer(Player const* player);
+
     class Manager
     {
     public:
@@ -36,10 +48,18 @@ namespace PvPLife
         // Public Hook & Participant Interface
         bool IsParticipant(uint32 guidLow) const;
         void DisengageParticipant(uint32 guidLow);
-        void OnPlayerLogout(uint32 guidLow);
+        void OnPlayerLogout(Player* player);
         void OnAddGroupMember(uint32 guidLow);
+        // PlayerScript/GroupScript hooks can fire on map-update threads (a bot's own AI logs it out
+        // or accepts an invite from inside Player::Update), concurrently with other hooks that read
+        // the participant list. They queue the GUID here; Update() disengages it on the world thread.
+        void QueueDisengage(uint32 guidLow);
+        bool IsConfiguredBotAccount(uint32 accountId) const;
 
     private:
+        void ProcessQueuedDisengages();
+        std::mutex _queuedDisengageMutex;
+        std::vector<uint32> _queuedDisengages;
         Manager() = default;
 
         bool VerifyDatabase();
@@ -49,7 +69,6 @@ namespace PvPLife
         bool LoadZoneByName(std::string name, Zone& out);
         void LoadZoneConfig();
         bool QueueZoneMutation(std::string const& sql);
-        bool IsDuelSlotInUse(uint32 slotId) const;
         void RefreshAccountCache();
         void ApplyZoneConfig(Zone& zone) const;
         Zone ReadZone(Field* fields);
@@ -57,13 +76,17 @@ namespace PvPLife
 
         std::vector<BotCandidate> LoadCandidates(TeamSide team, uint8 minLevel, uint8 maxLevel,
             std::unordered_set<uint32> const& excluded, uint32 deficit = 0);
-        std::vector<BotCandidate> LoadOfflineCandidates(TeamSide team, uint8 level,
+        // Offline bots between minLevel and maxLevel; the snapshot behind it is fetched
+        // asynchronously, so the first call for a level range returns nothing.
+        std::vector<BotCandidate> LoadOfflineCandidates(TeamSide team, uint8 minLevel, uint8 maxLevel,
             std::unordered_set<uint32> const& excluded);
+        static uint16 OfflineCacheKey(uint8 minLevel, uint8 maxLevel) { return uint16(uint16(minLevel) << 8 | maxLevel); }
+        // True if this bot's mod-hearthside-chat archetype is on PvPLife.Bots.Archetypes
+        // (or that list is empty, or the chat module is not in the build).
+        bool FitsArchetype(uint32 guidLow);
         Player* FindPlayer(uint32 guidLow) const;
         TeamSide TeamForRace(uint8 race) const;
-        bool IsConfiguredBotAccount(uint32 accountId);
         bool IsSafeBot(Player* player, bool allowPvPLifeReservation = false) const;
-        bool IsRealPlayer(Player const* player) const;
         uint8 EffectiveMinLevel(uint8 minLevel, ActivityType type = ActivityType::Skirmish) const;
 
         bool StartZone(Zone const& zone, ChatHandler* handler = nullptr, bool forced = false);
@@ -77,15 +100,21 @@ namespace PvPLife
         // Reactive Raid Response
         void TryQueueReactiveRaidResponse();
         void StartPendingRaidResponses();
-        void CancelPendingRaidResponse(uint64 responseId, std::string const& reason);
+        bool CancelPendingRaidResponse(uint64 responseId, std::string const& reason);
 
         // Movement, combat engagement and duels
         void ScheduleMove(uint64 eventId, PlayerbotsLife::LeaseToken const& token, uint32 guidLow,
             std::string const& name, uint32 mapId, float x, float y, float z, float o, uint32 delaySeconds, bool teleport);
-        void ScheduleDuel(uint64 eventId, uint64 pairId, PlayerbotsLife::LeaseToken const& challengerToken,
+        // False if the step was not queued (a bot already has a step, or the pair limit is reached).
+        bool ScheduleDuel(uint64 eventId, uint64 pairId, PlayerbotsLife::LeaseToken const& challengerToken,
             PlayerbotsLife::LeaseToken const& targetToken, uint32 challengerGuid, uint32 targetGuid,
             std::string const& challengerName, std::string const& targetName, uint32 delaySeconds,
-            bool realPlayerTarget = false);
+            bool realPlayerTarget = false, uint32 challengeClaimExpiry = 0);
+        // Erases matching duel steps, handing back the shared real-player challenge claim of any
+        // real-player step whose challenge was never sent.
+        template <class Pred> void EraseDuelSteps(Pred pred);
+        // A real player this bot may challenge right now (S5 checks, GM, level, range).
+        bool IsChallengeableRealPlayer(Player* target, Player* bot) const;
         void ScheduleEngagement(uint64 eventId, PlayerbotsLife::LeaseToken const& botToken,
             uint32 botGuid, uint32 targetGuid, uint32 delaySeconds);
         void ScheduleEventChat(ActiveEvent const& event);
@@ -102,7 +131,6 @@ namespace PvPLife
 
         static bool TryParseUInt32(std::string const& str, uint32& outVal);
         static bool TryParseUInt64(std::string const& str, uint64& outVal);
-        static bool TryParseFloat(std::string const& str, float& outVal);
 
         void ProcessMoveQueue();
         void ProcessDuelQueue();
@@ -122,13 +150,12 @@ namespace PvPLife
         uint32 GetLiveWorldBotCount() const;
         uint32 CalculatePopulationBudget() const;
         void CalculatePopulation(Zone const& zone, uint32& attackerCount, uint32& defenderCount) const;
-        uint32 RandomCount(uint32 minCount, uint32 maxCount) const;
 
         void AuditLog(std::string const& tag, std::string const& text) const;
         std::string RandomChatLine(ActivityType type, ChatChannel channel, TeamSide speakerTeam);
         void Announce(std::string const& text) const;
         void PrintStatus(ChatHandler* handler) const;
-        void PrintScan(ChatHandler* handler, uint8 minLevel, uint8 maxLevel) const;
+        void PrintScan(ChatHandler* handler, uint8 minLevel, uint8 maxLevel);
         void PrintHelp(ChatHandler* handler, bool isWpvp = false) const;
         void PrintCompat(ChatHandler* handler) const;
         void PrintReservations(ChatHandler* handler) const;
@@ -148,8 +175,7 @@ namespace PvPLife
         uint32 _tickSeconds = 20;
         uint32 _timerMs = 0;
         uint32 _startupElapsedMs = 0;
-        bool _startupDelayLogged = false;
-        uint32 _maxActiveEvents = 0;
+        uint32 _maxActiveEvents = 4;
 
         // Bot selection & filtering
         bool _requireBotEligibility = true;
@@ -159,6 +185,8 @@ namespace PvPLife
         uint32 _botAccountMax = 0;
         AccountFilterMode _accountFilterMode = AccountFilterMode::LegacyAny;
         uint32 _botQueryLimit = 500;
+        std::string _archetypes;           // PvPLife.Bots.Archetypes, comma-separated mod-hearthside-chat enum names
+        uint32 _archetypeMask = 0;         // parsed in LoadConfig; 0 with a non-empty list = no bot fits
         uint32 _minOnlineRequired = 3;
         uint8 _globalMinLevel = 20;
         bool _skipGroupedBots = true;
@@ -241,7 +269,6 @@ namespace PvPLife
         float _reactiveRallyDistance = 120.0f;
         float _reactiveLaneSpacing = 4.0f;
         uint32 _reactiveFormationColumns = 9;
-        float _reactiveAdvanceDistance = 25.0f;
         uint32 _lastReactiveResponse = 0;
         uint64 _nextResponseId = 1;
         std::vector<PendingRaidResponse> _pendingResponses;
@@ -259,12 +286,6 @@ namespace PvPLife
         uint32 _changesThisTick = 0;
         bool _proportionalZoneScaling = true;
 
-        // Compatibility with City Life
-        bool _harmonyEnable = true;
-        bool _respectCityLifeReservations = true;
-        bool _excludeCityLifeAccounts = true;
-        bool _independentHookProcessing = true;
-
         // Audit log
         bool _auditEnable = true;
         std::string _auditFilePath = "Logs/pvplife_audit.log";
@@ -281,8 +302,7 @@ namespace PvPLife
         std::unordered_map<uint32, uint32> _playerChallengeCooldown;
         std::unordered_map<uint32, uint32> _botChallengeCooldown;
         std::unordered_map<uint32, uint32> _botDuelCooldown;
-        std::unordered_map<uint32, bool> _botAccountCache;
-        bool _draining = false;
+        mutable std::unordered_map<uint32, bool> _botAccountCache;
         mutable uint32 _lastCensusTimeMs = 0;
         mutable uint32 _cachedLiveBotCount = 0;
         QueryCallbackProcessor _queryProcessor;
@@ -300,9 +320,9 @@ namespace PvPLife
             uint32 Weight;
         };
         std::vector<CachedChatLine> _chatCache;
-        std::unordered_map<uint8, std::vector<BotCandidate>> _offlineCandidateCache;
-        std::unordered_map<uint8, uint32> _offlineCandidateRefresh;
-        std::unordered_set<uint8> _offlineCandidateQueries;
+        std::unordered_map<uint16, std::vector<BotCandidate>> _offlineCandidateCache; // keyed by OfflineCacheKey
+        std::unordered_map<uint16, uint32> _offlineCandidateRefresh;
+        std::unordered_set<uint16> _offlineCandidateQueries;
         mutable std::unordered_map<uint32, uint32> _zoneLastRealPlayerTime;
         uint32 _lastCooldownPruneTime = 0;
         void PruneExpiredCooldowns();
@@ -344,12 +364,14 @@ namespace PvPLife
             Participant Part;
             uint32 EnqueuedAt = 0;
             uint32 Deadline = 0;
-            uint32 LastProgress = 0;
             uint32 Attempts = 0;
             ReleasePhase Phase = ReleasePhase::PendingCombatExit;
             bool ReturnHome = false;
         };
         std::vector<ReleasingParticipant> _releasingParticipants;
+        // The release path past the deadline, at logout and at shutdown: closes our duel, stops
+        // combat and restores AI state; teleports home only when allowTeleport and the bot can go.
+        void ForceReleaseParticipant(ReleasingParticipant const& releasing, Player* player, bool allowTeleport);
 
         struct ZoneConfig
         {
@@ -359,6 +381,7 @@ namespace PvPLife
         };
 
         std::unordered_map<std::string, ZoneConfig> _zoneConfig;
+        ZoneConfig BuildZoneConfig(Zone const& zone) const;
     };
 }
 

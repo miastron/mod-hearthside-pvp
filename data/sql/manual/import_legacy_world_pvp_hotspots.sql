@@ -1,8 +1,11 @@
 -- Migration script: Import customized records from legacy playerbot_world_pvp_hotspot into pvp_life_zone
--- Name-based conflict handling: existing pvp_life_zone records win (INSERT IGNORE).
--- Safe and non-destructive: does NOT drop or delete legacy tables or user records.
+-- Name-based conflict handling: a legacy hotspot replaces the pvp_life_zone row of the same name
+-- (most legacy names are also seeded by data/sql/db-world/base/pvp_life.sql, which the updater has
+-- already applied, so the import must overwrite them to carry the customizations over). The
+-- PvP Life-only columns (challenge_players, bot_chat) and rows without a legacy match are kept.
+-- Does NOT drop or delete legacy tables.
 
-INSERT IGNORE INTO `pvp_life_zone` (
+INSERT INTO `pvp_life_zone` (
   `name`,
   `enabled`,
   `activity_type`,
@@ -59,4 +62,29 @@ SELECT
   `last_start`,
   0 AS `challenge_players`,
   0 AS `bot_chat`
-FROM `playerbot_world_pvp_hotspot`;
+FROM `playerbot_world_pvp_hotspot`
+ON DUPLICATE KEY UPDATE
+  `enabled` = VALUES(`enabled`),
+  `activity_type` = VALUES(`activity_type`),
+  `attacker_team` = VALUES(`attacker_team`),
+  `defender_team` = VALUES(`defender_team`),
+  `min_level` = VALUES(`min_level`),
+  `max_level` = VALUES(`max_level`),
+  `map_id` = VALUES(`map_id`),
+  `rally_x` = VALUES(`rally_x`),
+  `rally_y` = VALUES(`rally_y`),
+  `rally_z` = VALUES(`rally_z`),
+  `rally_o` = VALUES(`rally_o`),
+  `target_x` = VALUES(`target_x`),
+  `target_y` = VALUES(`target_y`),
+  `target_z` = VALUES(`target_z`),
+  `target_o` = VALUES(`target_o`),
+  `attackers_min` = VALUES(`attackers_min`),
+  `attackers_max` = VALUES(`attackers_max`),
+  `defenders_min` = VALUES(`defenders_min`),
+  `defenders_max` = VALUES(`defenders_max`),
+  `duration_min` = VALUES(`duration_min`),
+  `duration_max` = VALUES(`duration_max`),
+  `weight` = VALUES(`weight`),
+  `cooldown_seconds` = VALUES(`cooldown_seconds`),
+  `last_start` = VALUES(`last_start`);

@@ -8,8 +8,10 @@
 #define PVP_LIFE_AUDIT_H
 
 #include "GameTime.h"
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <queue>
@@ -47,7 +49,11 @@ namespace PvPLife
             if (!_enabled)
                 return;
 
-            std::string line = std::to_string(GameTime::GetGameTime().count()) + " [" + tag + "] " + message + "\n";
+            std::string line = std::to_string(GameTime::GetGameTime().count()) + " [" + tag + "] " + message;
+            // One record per line: a newline inside a name or message must not forge another record.
+            std::replace(line.begin(), line.end(), '\n', ' ');
+            std::replace(line.begin(), line.end(), '\r', ' ');
+            line += '\n';
 
             {
                 std::lock_guard<std::mutex> lock(_queueMutex);
@@ -75,6 +81,7 @@ namespace PvPLife
 
         void Shutdown()
         {
+            _enabled = false; // nothing is queued once the worker is gone
             if (!_running.load(std::memory_order_acquire))
                 return;
 
@@ -109,9 +116,9 @@ namespace PvPLife
         void WorkerLoop()
         {
             std::ofstream file;
-            std::string currentPath;
             std::queue<std::string> pendingBuffer;
             auto lastRetryTime = std::chrono::steady_clock::now();
+            bool firstPass = true;
 
             while (true)
             {
@@ -128,11 +135,13 @@ namespace PvPLife
 
                     stopping = _stopping.load(std::memory_order_acquire);
 
-                    if (_pathChanged || currentPath.empty())
+                    // Read the path under the lock on every pass: Configure may change it.
+                    targetPath = _filePath;
+                    if (_pathChanged || firstPass)
                     {
-                        targetPath = _filePath;
                         _pathChanged = false;
                         needReopen = true;
+                        firstPass = false;
                     }
 
                     while (!_queue.empty())
@@ -149,19 +158,24 @@ namespace PvPLife
                     }
                 }
 
+                // Open on the first pass and after a path change; retry a failed open every 5s.
                 auto now = std::chrono::steady_clock::now();
-                if (needReopen || (!file.is_open() && !targetPath.empty() && now - lastRetryTime >= std::chrono::seconds(5)))
+                if (needReopen || (!file.is_open() && now - lastRetryTime >= std::chrono::seconds(5)))
                 {
                     lastRetryTime = now;
                     if (file.is_open())
                         file.close();
 
-                    currentPath = targetPath.empty() ? _filePath : targetPath;
-                    file.open(currentPath, std::ios::app);
-                    if (!file.is_open())
+                    if (!targetPath.empty())
                     {
-                        ++_openFailures;
+                        std::error_code ignored;
+                        std::filesystem::path parent = std::filesystem::path(targetPath).parent_path();
+                        if (!parent.empty())
+                            std::filesystem::create_directories(parent, ignored);
+                        file.open(targetPath, std::ios::app);
                     }
+                    if (!file.is_open())
+                        ++_openFailures;
                 }
 
                 if (file.is_open())
@@ -180,16 +194,14 @@ namespace PvPLife
                     }
                     file.flush();
                 }
-                else if (stopping)
+
+                // Stopping: one write pass is all there is. Whatever it could not write (file not
+                // open, or a write failed) is counted and dropped, so shutdown cannot spin here.
+                if (stopping)
                 {
                     _writeFailures += static_cast<uint32_t>(pendingBuffer.size());
-                    while (!pendingBuffer.empty())
-                        pendingBuffer.pop();
                     break;
                 }
-
-                if (stopping && pendingBuffer.empty())
-                    break;
             }
 
             if (file.is_open())

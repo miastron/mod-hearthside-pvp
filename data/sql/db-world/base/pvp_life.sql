@@ -1,5 +1,12 @@
--- PvP Life
--- Apply to the AzerothCore WORLD database.
+-- mod-hearthside-pvp: world database (pvp_life_zone, pvp_life_chat, the .wpvp command row).
+-- One idempotent file, applied by AzerothCore's updater and re-applied whenever it changes:
+-- tables are created only if missing and no re-apply overwrites what an operator changed. A
+-- hotspot that was edited or disabled keeps its values (seeds are skipped by name); one that was
+-- deleted or renamed comes back on the next re-apply, so disable a seeded hotspot instead.
+-- Chat lines are seeded only while a capital-battle activity has none at all, so edited or
+-- deleted lines are never re-added.
+-- Folded from the upstream mod-playerbots-pvp-life manual + updates scripts, none of which had
+-- been applied through the updater.
 
 CREATE TABLE IF NOT EXISTS `pvp_life_zone` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -95,7 +102,7 @@ VALUES
 ('BlackrockMountain',0,0,2,2,50,60,0, -7500,-1100,270,0, -7550,-1250,270,0, 4,10,4,10, 10,25, 100, 2400, 0, 0, 0),
 ('LightHopeChapel',0,0,1,0,55,60,0, 2250,-5300,85,0, 2280,-5310,85,0, 4,10,4,10, 10,25, 90, 3600, 0, 0, 0);
 
--- Seed chatter for faction capital battles (non-destructive insert if absent)
+-- Seed chatter for faction capital battles: only for an activity type that has no lines yet.
 INSERT INTO `pvp_life_chat` (`enabled`,`activity_type`,`channel`,`speaker_team`,`text`,`weight`)
 SELECT * FROM (
   -- For the Horde: Alliance defenders reacting.
@@ -122,24 +129,13 @@ SELECT * FROM (
 WHERE NOT EXISTS (
   SELECT 1 FROM `pvp_life_chat` c
   WHERE c.activity_type = tmp.activity_type
-    AND c.channel = tmp.channel
-    AND c.speaker_team = tmp.speaker_team
-    AND c.text = tmp.text
 );
 
--- Compatibility GM Commands for .wpvp (non-destructive insert if absent)
+-- GM command help for the legacy .wpvp root. Only `wpvp` itself is a registered command (its
+-- subcommands are parsed by the module), so the core skips any `wpvp ...` row with an error on
+-- every start: remove the ones earlier versions of this file seeded.
+DELETE FROM `command` WHERE `name` IN ('wpvp help', 'wpvp status', 'wpvp scan', 'wpvp start', 'wpvp stop',
+  'wpvp spot', 'wpvp spot list', 'wpvp spot create', 'wpvp spot rally', 'wpvp spot target',
+  'wpvp spot counts', 'wpvp spot duration', 'wpvp spot enable');
 INSERT IGNORE INTO `command` (`name`, `security`, `help`) VALUES
-('wpvp', 3, 'Syntax: .wpvp help\nPlayerbot World PvP GM commands (PvP Life Compatibility).'),
-('wpvp help', 3, 'Syntax: .wpvp help\nShows Playerbot World PvP commands.'),
-('wpvp status', 3, 'Syntax: .wpvp status\nShows active world-PvP events.'),
-('wpvp scan', 3, 'Syntax: .wpvp scan [minLvl] [maxLvl]\nShows eligible online random Playerbots and per-hotspot readiness.'),
-('wpvp start', 3, 'Syntax: .wpvp start <spot>\nForce-start a configured world-PvP hotspot.'),
-('wpvp stop', 3, 'Syntax: .wpvp stop <id|all>\nStop one or all active world-PvP events.'),
-('wpvp spot', 3, 'Syntax: .wpvp spot <subcommand>\nManage Playerbot World PvP hotspots.'),
-('wpvp spot list', 3, 'Syntax: .wpvp spot list\nList configured hotspots.'),
-('wpvp spot create', 3, 'Syntax: .wpvp spot create <name> <attacker> <defender> <minLvl> <maxLvl>\nCreate/update a hotspot at your current position.'),
-('wpvp spot rally', 3, 'Syntax: .wpvp spot rally <name>\nSave your current location as attacker rally/outside-town point.'),
-('wpvp spot target', 3, 'Syntax: .wpvp spot target <name>\nSave your current location as target/defender point.'),
-('wpvp spot counts', 3, 'Syntax: .wpvp spot counts <name> <attMin> <attMax> <defMin> <defMax>\nSet event population.'),
-('wpvp spot duration', 3, 'Syntax: .wpvp spot duration <name> <minMinutes> <maxMinutes>\nSet event duration.'),
-('wpvp spot enable', 3, 'Syntax: .wpvp spot enable <name> <0|1>\nEnable or disable a hotspot.');
+('wpvp', 3, 'Syntax: .wpvp <subcommand>\nLegacy alias of .pvplife (spot = zone). .wpvp help lists the subcommands.');

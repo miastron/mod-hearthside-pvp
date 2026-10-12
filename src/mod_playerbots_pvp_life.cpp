@@ -10,8 +10,11 @@
 
 #include "Chat.h"
 #include "CommandScript.h"
+#include "Group.h"
+#include "GroupScript.h"
 #include "ObjectAccessor.h"
 #include "Player.h"
+#include "PlayerbotAI.h"
 #include "PlayerScript.h"
 #include "ScriptMgr.h"
 #include "WorldScript.h"
@@ -43,9 +46,6 @@ public:
     }
 };
 
-#include "Group.h"
-#include "GroupScript.h"
-
 class PvPLifePlayerScript : public PlayerScript
 {
 public:
@@ -56,8 +56,7 @@ public:
 
     void OnPlayerLogout(Player* player) override
     {
-        if (player)
-            sPvPLifeMgr.OnPlayerLogout(player->GetGUID().GetCounter());
+        sPvPLifeMgr.OnPlayerLogout(player);
     }
 };
 
@@ -77,8 +76,8 @@ public:
         bool hasRealPlayer = false;
         for (GroupReference const* ref = group->GetFirstMember(); ref != nullptr; ref = ref->next())
         {
-            Player const* member = ref->GetSource();
-            if (member && member->GetSession() && !member->GetSession()->IsBot())
+            // A SelfBot is a person who switched on bot control: still a human taking the bot over.
+            if (PvPLife::IsHumanPlayer(ref->GetSource()) || ::IsSelfBot(ref->GetSource()))
             {
                 hasRealPlayer = true;
                 break;
@@ -91,7 +90,7 @@ public:
             for (GroupReference const* ref = group->GetFirstMember(); ref != nullptr; ref = ref->next())
             {
                 Player const* member = ref->GetSource();
-                if (member && member->GetSession() && member->GetSession()->IsBot())
+                if (PvPLife::IsBotSession(member))
                     sPvPLifeMgr.OnAddGroupMember(member->GetGUID().GetCounter());
             }
         }
@@ -126,10 +125,15 @@ public:
 
 void AddPvPLifeScripts()
 {
-    static_assert(PlayerbotsLife::LIFE_BOT_RESERVATION_PROTOCOL_VERSION == 2026101104,
-        "PvP Life requires LifeBotReservation protocol version 2026101104");
+    // A static_assert here could only compare this module's copy of LifeBotReservation.h with
+    // itself; CheckProtocolVersion compares it with the copy the first registered Life module used.
+    if (!PlayerbotsLife::CheckProtocolVersion())
+        LOG_ERROR("server.loading", ">> PvP Life: LifeBotReservation.h protocol {} does not match {} from another Life "
+            "module. Copy one LifeBotReservation.h into every Life module and rebuild.",
+            PlayerbotsLife::LIFE_BOT_RESERVATION_PROTOCOL_VERSION, PlayerbotsLife::GetRegisteredProtocolVersion());
 
-    PlayerbotsLife::RegisterActiveModule(PlayerbotsLife::MODULE_PVP_LIFE);
+    // The active-module flag is set by Manager::LoadConfig, only while the module is enabled and
+    // its tables check out.
     PlayerbotsLife::RegisterTelemetryBridge();
     new PvPLifeWorldScript();
     new PvPLifePlayerScript();

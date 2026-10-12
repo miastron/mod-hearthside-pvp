@@ -125,8 +125,10 @@ namespace PvPLife
         float StayZ = 0.0f;
         uint32 StayMapId = 0;
         bool Captured = false;
-        std::vector<std::string> AppliedCombatStrategies;
-        std::vector<std::string> AppliedNonCombatStrategies;
+        // The "+x"/"-x" strategy changes this module applied, so a restore can reverse exactly
+        // those and leave anything else that changed meanwhile alone.
+        std::vector<std::string> AppliedCombatChanges;
+        std::vector<std::string> AppliedNonCombatChanges;
         bool AppliedPvPFlag = false;
     };
 
@@ -226,6 +228,9 @@ namespace PvPLife
         bool TargetIsRealPlayer = false;
         bool RequestSent = false;
         uint32 RequestDeadline = 0;
+        // Expiry of the shared real-player challenge claim taken for this step (0 = none). Handed
+        // back if the step is dropped before the challenge is sent.
+        uint32 ChallengeClaimExpiry = 0;
     };
 
     struct ChatStep
