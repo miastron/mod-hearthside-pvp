@@ -61,23 +61,23 @@ INSERT IGNORE INTO `pvp_life_zone`
  `attackers_min`,`attackers_max`,`defenders_min`,`defenders_max`,`duration_min`,`duration_max`,`weight`,`cooldown_seconds`,`last_start`,`challenge_players`,`bot_chat`)
 VALUES
 -- Duel zones: intentionally level 1-80. Both modules run capital gate duels concurrently.
-('StormwindDuel',1,1,0,0,1,80,0, -9122.49,350.862,93.7893,4.19046, -9122.49,350.862,93.7893,4.19046, 4,8,4,8,20,40,220,30,0,1,0),
-('OrgrimmarDuel',1,1,1,1,1,80,1, 1282.04,-4395.88,26.3002,3.63561, 1282.04,-4395.88,26.3002,3.63561, 4,8,4,8,20,40,220,30,0,1,0),
+('StormwindDuel',1,1,0,0,1,80,0, -9122.49,350.862,93.7893,4.19046, -9122.49,350.862,93.7893,4.19046, 2,4,2,4,20,40,220,30,0,1,0),
+('OrgrimmarDuel',1,1,1,1,1,80,1, 1282.04,-4395.88,26.3002,3.63561, 1282.04,-4395.88,26.3002,3.63561, 2,4,2,4,20,40,220,30,0,1,0),
 
 -- Classic world-PvP hotspots (PvP Life baseline)
-('STV_Nesingwary',1,0,1,0,25,50,0, -11490.5,-302.536,35.7362,3.57, -11490.5,-302.536,35.7362,3.57, 5,10,5,10,12,25,120,600,0,0,0),
-('STV_Gurubashi',1,0,0,1,30,55,0, -13290.0,-274.0,20.0,0.0, -13245.0,-266.0,21.0,0.0, 6,12,6,12,12,25,130,600,0,0,0),
-('Tanaris_Gadgetzan',1,0,1,0,40,65,1, -7200.0,-3860.0,9.0,0.0, -7165.0,-3805.0,9.0,0.0, 5,10,5,10,12,25,110,720,0,0,0),
-('DarkPortal_Azeroth',1,0,0,1,55,80,0, -11820.0,-3200.0,-30.0,0.0, -11905.0,-3204.0,-14.0,0.0, 6,14,6,14,15,30,135,900,0,0,0),
-('DarkPortal_Outland',1,0,1,0,58,80,530, -320.0,930.0,84.0,0.0, -248.0,922.0,84.0,0.0, 6,14,6,14,15,30,135,900,0,0,0),
-('Shattrath_Outskirts',1,0,0,1,60,80,530, -1878.6,4927.39,-10.3383,4.33574, -1878.6,4927.39,-10.3383,4.33574, 5,12,5,12,12,25,100,900,0,0,0),
-('K3_StormPeaks',1,0,1,0,70,80,571, 6197.19,-1001.47,408.121,4.65582, 6197.19,-1001.47,408.121,4.65582, 5,12,5,12,12,25,105,900,0,0,0),
-('Wintergrasp',1,0,1,0,70,80,571, 4700.1,2867.58,387.683,3.3566, 4700.1,2867.58,387.683,3.3566, 5,12,5,12,12,25,115,900,0,0,0),
-('Goldshire_Roaming',1,0,1,0,5,30,0, -9520.0,55.0,58.0,0.0, -9465.0,64.0,56.0,0.0, 2,5,2,5,8,18,85,720,0,0,0),
-('Durotar_Roaming',1,0,0,1,5,30,1, 1375.0,-4550.0,24.0,0.0, 1450.0,-4418.0,25.0,0.0, 2,5,2,5,8,18,85,720,0,0,0),
-('Orgrimmar_Zeppelin',0,0,0,1,10,80,1, 1320.0,-4630.0,25.0,0.0, 1360.0,-4590.0,25.0,0.0, 2,6,2,6,8,18,60,900,0,0,0),
-('ForTheHorde_Stormwind',1,2,1,0,70,80,0, -9465.0,64.0,56.0,0.0, -8830.0,622.0,94.0,0.0, 6,14,6,14,15,25,100,3600,0,0,1),
-('ForTheAlliance_Orgrimmar',1,3,0,1,70,80,1, 1915.0,-4755.0,40.0,0.0, 1500.0,-4415.0,22.0,0.0, 6,14,6,14,15,25,100,3600,0,0,1),
+('STV_Nesingwary',1,0,1,0,25,50,0, -11490.5,-302.536,35.7362,3.57, -11490.5,-302.536,35.7362,3.57, 2,5,2,5,12,25,120,600,0,0,0),
+('STV_Gurubashi',1,0,0,1,30,55,0, -13290.0,-274.0,20.0,0.0, -13245.0,-266.0,21.0,0.0, 2,5,2,5,12,25,130,600,0,0,0),
+('Tanaris_Gadgetzan',1,0,1,0,40,65,1, -7200.0,-3860.0,9.0,0.0, -7165.0,-3805.0,9.0,0.0, 2,5,2,5,12,25,110,720,0,0,0),
+('DarkPortal_Azeroth',1,0,0,1,55,80,0, -11820.0,-3200.0,-30.0,0.0, -11905.0,-3204.0,-14.0,0.0, 3,6,3,6,15,30,135,900,0,0,0),
+('DarkPortal_Outland',1,0,1,0,58,80,530, -320.0,930.0,84.0,0.0, -248.0,922.0,84.0,0.0, 3,6,3,6,15,30,135,900,0,0,0),
+('Shattrath_Outskirts',1,0,0,1,60,80,530, -1878.6,4927.39,-10.3383,4.33574, -1878.6,4927.39,-10.3383,4.33574, 2,5,2,5,12,25,100,900,0,0,0),
+('K3_StormPeaks',1,0,1,0,70,80,571, 6197.19,-1001.47,408.121,4.65582, 6197.19,-1001.47,408.121,4.65582, 2,5,2,5,12,25,105,900,0,0,0),
+('Wintergrasp',1,0,1,0,70,80,571, 4700.1,2867.58,387.683,3.3566, 4700.1,2867.58,387.683,3.3566, 3,6,3,6,12,25,115,900,0,0,0),
+('Goldshire_Roaming',1,0,1,0,5,30,0, -9520.0,55.0,58.0,0.0, -9465.0,64.0,56.0,0.0, 2,3,1,3,8,18,85,720,0,0,0),
+('Durotar_Roaming',1,0,0,1,5,30,1, 1375.0,-4550.0,24.0,0.0, 1450.0,-4418.0,25.0,0.0, 2,3,1,3,8,18,85,720,0,0,0),
+('Orgrimmar_Zeppelin',0,0,0,1,10,80,1, 1320.0,-4630.0,25.0,0.0, 1360.0,-4590.0,25.0,0.0, 2,4,1,4,8,18,60,900,0,0,0),
+('ForTheHorde_Stormwind',1,2,1,0,70,80,0, -9465.0,64.0,56.0,0.0, -8830.0,622.0,94.0,0.0, 3,7,3,7,15,25,100,3600,0,0,1),
+('ForTheAlliance_Orgrimmar',1,3,0,1,70,80,1, 1915.0,-4755.0,40.0,0.0, 1500.0,-4415.0,22.0,0.0, 3,7,3,7,15,25,100,3600,0,0,1),
 
 -- Imported World PvP Hotspots (Eastern Kingdoms & Kalimdor Campaigns)
 ('Lakeshire',1,0,1,0,20,35,0, -9325,-2285,70,0, -9215,-2150,70,0, 2,5,2,5, 5,12, 140, 1800, 0, 0, 0),
@@ -101,6 +101,41 @@ VALUES
 ('SearingGorge',0,0,2,2,45,55,0, -6500,-1200,180,0, -6550,-1150,180,0, 3,8,3,8, 8,18, 80, 2400, 0, 0, 0),
 ('BlackrockMountain',0,0,2,2,50,60,0, -7500,-1100,270,0, -7550,-1250,270,0, 4,10,4,10, 10,25, 100, 2400, 0, 0, 0),
 ('LightHopeChapel',0,0,1,0,55,60,0, 2250,-5300,85,0, 2280,-5310,85,0, 4,10,4,10, 10,25, 90, 3600, 0, 0, 0);
+
+-- One-time migration: upstream shipped per-zone PvPLife.Zone.*.Min/MaxPopulation conf overrides for these
+-- 15 hotspots, and a conf override beats the database (so .pvplife zone commands did nothing for them).
+-- The overrides are now the seed values above; this moves a database seeded before that onto them too.
+-- Each UPDATE only matches a row still holding the previous seed counts, so it cannot undo a GM edit.
+UPDATE `pvp_life_zone` SET `attackers_min`=2,`attackers_max`=4,`defenders_min`=2,`defenders_max`=4
+  WHERE `name`='StormwindDuel' AND `attackers_min`=4 AND `attackers_max`=8 AND `defenders_min`=4 AND `defenders_max`=8;
+UPDATE `pvp_life_zone` SET `attackers_min`=2,`attackers_max`=4,`defenders_min`=2,`defenders_max`=4
+  WHERE `name`='OrgrimmarDuel' AND `attackers_min`=4 AND `attackers_max`=8 AND `defenders_min`=4 AND `defenders_max`=8;
+UPDATE `pvp_life_zone` SET `attackers_min`=2,`attackers_max`=5,`defenders_min`=2,`defenders_max`=5
+  WHERE `name`='STV_Nesingwary' AND `attackers_min`=5 AND `attackers_max`=10 AND `defenders_min`=5 AND `defenders_max`=10;
+UPDATE `pvp_life_zone` SET `attackers_min`=2,`attackers_max`=5,`defenders_min`=2,`defenders_max`=5
+  WHERE `name`='STV_Gurubashi' AND `attackers_min`=6 AND `attackers_max`=12 AND `defenders_min`=6 AND `defenders_max`=12;
+UPDATE `pvp_life_zone` SET `attackers_min`=2,`attackers_max`=5,`defenders_min`=2,`defenders_max`=5
+  WHERE `name`='Tanaris_Gadgetzan' AND `attackers_min`=5 AND `attackers_max`=10 AND `defenders_min`=5 AND `defenders_max`=10;
+UPDATE `pvp_life_zone` SET `attackers_min`=3,`attackers_max`=6,`defenders_min`=3,`defenders_max`=6
+  WHERE `name`='DarkPortal_Azeroth' AND `attackers_min`=6 AND `attackers_max`=14 AND `defenders_min`=6 AND `defenders_max`=14;
+UPDATE `pvp_life_zone` SET `attackers_min`=3,`attackers_max`=6,`defenders_min`=3,`defenders_max`=6
+  WHERE `name`='DarkPortal_Outland' AND `attackers_min`=6 AND `attackers_max`=14 AND `defenders_min`=6 AND `defenders_max`=14;
+UPDATE `pvp_life_zone` SET `attackers_min`=2,`attackers_max`=5,`defenders_min`=2,`defenders_max`=5
+  WHERE `name`='Shattrath_Outskirts' AND `attackers_min`=5 AND `attackers_max`=12 AND `defenders_min`=5 AND `defenders_max`=12;
+UPDATE `pvp_life_zone` SET `attackers_min`=2,`attackers_max`=5,`defenders_min`=2,`defenders_max`=5
+  WHERE `name`='K3_StormPeaks' AND `attackers_min`=5 AND `attackers_max`=12 AND `defenders_min`=5 AND `defenders_max`=12;
+UPDATE `pvp_life_zone` SET `attackers_min`=3,`attackers_max`=6,`defenders_min`=3,`defenders_max`=6
+  WHERE `name`='Wintergrasp' AND `attackers_min`=5 AND `attackers_max`=12 AND `defenders_min`=5 AND `defenders_max`=12;
+UPDATE `pvp_life_zone` SET `attackers_min`=2,`attackers_max`=3,`defenders_min`=1,`defenders_max`=3
+  WHERE `name`='Goldshire_Roaming' AND `attackers_min`=2 AND `attackers_max`=5 AND `defenders_min`=2 AND `defenders_max`=5;
+UPDATE `pvp_life_zone` SET `attackers_min`=2,`attackers_max`=3,`defenders_min`=1,`defenders_max`=3
+  WHERE `name`='Durotar_Roaming' AND `attackers_min`=2 AND `attackers_max`=5 AND `defenders_min`=2 AND `defenders_max`=5;
+UPDATE `pvp_life_zone` SET `attackers_min`=2,`attackers_max`=4,`defenders_min`=1,`defenders_max`=4
+  WHERE `name`='Orgrimmar_Zeppelin' AND `attackers_min`=2 AND `attackers_max`=6 AND `defenders_min`=2 AND `defenders_max`=6;
+UPDATE `pvp_life_zone` SET `attackers_min`=3,`attackers_max`=7,`defenders_min`=3,`defenders_max`=7
+  WHERE `name`='ForTheHorde_Stormwind' AND `attackers_min`=6 AND `attackers_max`=14 AND `defenders_min`=6 AND `defenders_max`=14;
+UPDATE `pvp_life_zone` SET `attackers_min`=3,`attackers_max`=7,`defenders_min`=3,`defenders_max`=7
+  WHERE `name`='ForTheAlliance_Orgrimmar' AND `attackers_min`=6 AND `attackers_max`=14 AND `defenders_min`=6 AND `defenders_max`=14;
 
 -- Seed chatter for faction capital battles: only for an activity type that has no lines yet.
 INSERT INTO `pvp_life_chat` (`enabled`,`activity_type`,`channel`,`speaker_team`,`text`,`weight`)
