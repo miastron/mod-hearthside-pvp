@@ -9,6 +9,7 @@
 
 #include "PvPLifeTypes.h"
 #include "AsyncCallbackProcessor.h"
+#include "Position.h"
 #include "QueryCallback.h"
 #include "Transaction.h"
 #include <mutex>
@@ -139,12 +140,24 @@ namespace PvPLife
         void ProcessRealPlayerChallenges();
         void MaintainDuelParticipants();
         void MaintainBotDuels();
+        // Strafes, hops and spacing for leased bots mid-duel; playerbots' own combat AI only closes
+        // to range or flees (PvPLife.Duel.Footwork.*).
+        void UpdateDuelFootwork();
+        void DuelFootwork(Player* bot, Player* opponent, Participant const& participant);
+        // Keeps mod-playerbots' level brackets from re-leveling a bot while it is leased.
+        void KeepLeasedLevelsFixed();
         void ProcessReleasingParticipants();
         void ProcessPreparingEvents();
         void DeployEventMembers(ActiveEvent& event, uint32& changesCount, uint32 maxChanges);
 
         void ApplyPvpStrategies(Player* player, bool duelMode) const;
-        void MoveBot(Player* player, uint32 mapId, float x, float y, float z, float o, bool teleport) const;
+        // With PvPLife.Movement.DropOffArrival a "teleport" is an arrival: a bot within walking range walks
+        // in; anyone else is dropped off out of sight on a clear path and walks or rides the rest.
+        void MoveBot(Player* player, uint32 mapId, float x, float y, float z, float o, bool teleport);
+        void WalkBot(Player* player, uint32 mapId, float x, float y, float z);
+        bool FindDropOff(Player* bot, uint32 mapId, float x, float y, float z, Position& dropOff) const;
+        void ProcessPendingWalks();
+        bool IsLeasedParticipant(uint32 guidLow) const;
         void EngageTarget(Player* bot, Player* target);
         float Jitter() const;
         uint32 GetLiveWorldBotCount() const;
@@ -200,6 +213,7 @@ namespace PvPLife
         bool _teleportOnArrival = true;
         bool _useMovePoint = true;
         bool _hardTeleportToTarget = false;
+        bool _dropOffArrival = true;
         uint32 _positionJitter = 10;
         uint32 _arrivalStaggerMin = 2;
         uint32 _arrivalStaggerMax = 12;
@@ -240,6 +254,12 @@ namespace PvPLife
         uint32 _botChallengeCooldownSeconds = 180;
         uint32 _botDuelCooldownSeconds = 45;
         uint32 _botDuelMaxLevelDifference = 5;
+        bool _footworkEnable = true;
+        uint32 _footworkIntervalMinMs = 1500;
+        uint32 _footworkIntervalMaxMs = 4000;
+        uint32 _footworkJumpChance = 35;
+        std::unordered_map<uint32, uint64> _footworkNextMs;
+        std::unordered_set<std::string> _levelExcludeNamesAdded;
 
         // Campaigns & chatter
         bool _forTheHordeEnable = true;
@@ -296,6 +316,16 @@ namespace PvPLife
         uint64 _nextAssignmentId = 1;
         std::vector<ActiveEvent> _activeEvents;
         std::vector<MoveStep> _moveQueue;
+        // A bot just dropped off out of sight, waiting for its teleport to land before it walks in.
+        struct PendingWalk
+        {
+            uint32 MapId = 0;
+            float X = 0.0f, Y = 0.0f, Z = 0.0f;
+            uint64 DueMs = 0;
+            bool MountTried = false;
+        };
+        std::unordered_map<uint32, PendingWalk> _pendingWalks;
+        std::unordered_set<uint32> _dismountOnArrival;
         std::vector<DuelStep> _duelQueue;
         std::vector<EngagementStep> _engagementQueue;
         std::vector<ChatStep> _chatQueue;

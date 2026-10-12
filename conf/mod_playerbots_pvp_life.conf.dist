@@ -189,6 +189,19 @@ PvPLife.Bots.ReturnAfterActivity = 1
 PvPLife.Movement.TeleportOnArrival = 1
 
 #
+#   PvPLife.Movement.DropOffArrival
+#       Description: Bots never pop in at an activity point. A bot on the same map within 140 yards walks
+#                    (or rides) there along the navmesh; any other bot is first dropped off 70-120 yards out,
+#                    at a spot no real player is near or has line of sight to, with a plain walkable path in
+#                    (no partial path, no ledge drops, no long detour) and no hostile creatures beside it, then
+#                    mounts (a flying mount where the zone allows one) and rides in. Covers arrivals, the
+#                    HardTeleportToTarget move and the duel leash. Falls back to the old teleport only when no
+#                    such spot exists. Overrides TeleportOnArrival.
+#       Default:     1 (Enabled)
+#
+PvPLife.Movement.DropOffArrival = 1
+
+#
 #   PvPLife.Movement.UseMovePoint
 #       Description: Advance bots toward target combat point using MotionMaster MovePoint.
 #       Default:     1 (Enabled)
@@ -347,7 +360,7 @@ PvPLife.Duel.PairDelayMaxSeconds = 18
 #
 #   PvPLife.Duel.LeashRadius
 #       Description: Distance in yards an idle duel bot may stray from its own staging point before it is
-#                    teleported back (10-1000).
+#                    called back (walks back with DropOffArrival, else teleported) (10-1000).
 #       Default:     40
 #
 PvPLife.Duel.LeashRadius = 40
@@ -358,6 +371,30 @@ PvPLife.Duel.LeashRadius = 40
 #       Default:     1000
 #
 PvPLife.Duel.GuardIntervalMs = 1000
+
+#
+#   PvPLife.Duel.Footwork.Enable
+#       Description: Make leased bots move like players during a duel: casters back off when crowded and
+#                    strafe at range, melee circle their opponent and leap while closing, both with jumps.
+#                    Never during a cast, a stun/root/fear, or past the leash.
+#       Default:     1 (Enabled)
+#
+PvPLife.Duel.Footwork.Enable = 1
+
+#
+#   PvPLife.Duel.Footwork.IntervalMinMs / IntervalMaxMs
+#       Description: Random delay between one bot's footwork moves, in milliseconds.
+#       Default:     1500, 4000
+#
+PvPLife.Duel.Footwork.IntervalMinMs = 1500
+PvPLife.Duel.Footwork.IntervalMaxMs = 4000
+
+#
+#   PvPLife.Duel.Footwork.JumpChance
+#       Description: Percent of footwork moves made as a jump (0-100).
+#       Default:     35
+#
+PvPLife.Duel.Footwork.JumpChance = 35
 
 #
 #   PvPLife.Duel.ChallengeRealPlayers

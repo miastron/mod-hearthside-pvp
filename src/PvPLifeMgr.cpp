@@ -11,11 +11,14 @@
 #include "LifeBotReservation.h"
 
 #include "BattlefieldMgr.h"
+#include "CellImpl.h"
 #include "Chat.h"
 #include "Config.h"
 #include "DatabaseEnv.h"
 #include "DBCStores.h"
 #include "GameTime.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"
 #include "Group.h"
 #include "Log.h"
 #include "Map.h"
@@ -24,6 +27,7 @@
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "Opcodes.h"
+#include "PathGenerator.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "PlayerbotAIConfig.h"
@@ -340,6 +344,7 @@ namespace PvPLife
         _teleportOnArrival = sConfigMgr->GetOption<bool>("PvPLife.Movement.TeleportOnArrival", true);
         _useMovePoint = sConfigMgr->GetOption<bool>("PvPLife.Movement.UseMovePoint", true);
         _hardTeleportToTarget = sConfigMgr->GetOption<bool>("PvPLife.Movement.HardTeleportToTarget", false);
+        _dropOffArrival = sConfigMgr->GetOption<bool>("PvPLife.Movement.DropOffArrival", true);
         _positionJitter = sConfigMgr->GetOption<uint32>("PvPLife.Movement.PositionJitter", 10);
         _arrivalStaggerMin = sConfigMgr->GetOption<uint32>("PvPLife.Movement.ArrivalStaggerMinSeconds", 2);
         _arrivalStaggerMax = sConfigMgr->GetOption<uint32>("PvPLife.Movement.ArrivalStaggerMaxSeconds", 12);
@@ -372,6 +377,10 @@ namespace PvPLife
         _duelPairDelayMax = sConfigMgr->GetOption<uint32>("PvPLife.Duel.PairDelayMaxSeconds", 18);
         _duelLeashRadius = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.LeashRadius", 40), 10, 1000);
         _duelGuardIntervalMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.GuardIntervalMs", 1000), 250, 5000);
+        _footworkEnable = sConfigMgr->GetOption<bool>("PvPLife.Duel.Footwork.Enable", true);
+        _footworkIntervalMinMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.Footwork.IntervalMinMs", 1500), 500, 30000);
+        _footworkIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.Footwork.IntervalMaxMs", 4000), _footworkIntervalMinMs, 60000);
+        _footworkJumpChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Duel.Footwork.JumpChance", 35));
         _challengeRealPlayers = sConfigMgr->GetOption<bool>("PvPLife.Duel.ChallengeRealPlayers", true);
         _realPlayerChallengeChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Duel.PlayerChallengeChance", 25));
         _realPlayerScanRadius = std::min<uint32>(1000, sConfigMgr->GetOption<uint32>("PvPLife.Duel.PlayerScanRadius", 55));
@@ -1579,12 +1588,58 @@ namespace PvPLife
         _engagementQueue.push_back(step);
     }
 
-    void Manager::MoveBot(Player* player, uint32 mapId, float x, float y, float z, float o, bool teleport) const
+    namespace
+    {
+        // A bot this close walks in; farther (or on another map) it is dropped off first. Below
+        // mod-playerbots' ReactDistance (150) so its own "return to stay position" keeps walking it.
+        constexpr float WalkInRange = 140.0f;
+        // Drop-off ring around the destination: past what anyone standing there notices, inside WalkInRange.
+        constexpr float DropOffMinDistance = 70.0f;
+        constexpr float DropOffMaxDistance = 120.0f;
+        constexpr uint32 DropOffAttempts = 24;
+        // Riding is worth a mount cast past this.
+        constexpr float MountUpDistance = 45.0f;
+
+        uint64 NowMs()
+        {
+            return static_cast<uint64>(GameTime::GetGameTimeMS().count());
+        }
+    }
+
+    void Manager::MoveBot(Player* player, uint32 mapId, float x, float y, float z, float o, bool teleport)
     {
         if (!player || player->IsBeingTeleported())
             return;
 
-        if (teleport || player->GetMapId() != mapId || !_useMovePoint)
+        bool sameMap = player->GetMapId() == mapId;
+        if (_dropOffArrival && player->IsAlive() && (teleport || !sameMap || !_useMovePoint))
+        {
+            if (sameMap && player->GetExactDist2d(x, y) <= WalkInRange)
+            {
+                WalkBot(player, mapId, x, y, z);
+                return;
+            }
+            Position dropOff;
+            if (FindDropOff(player, mapId, x, y, z, dropOff))
+            {
+                if (player->IsInCombat())
+                    player->CombatStop(true);
+                player->TeleportTo(mapId, dropOff.GetPositionX(), dropOff.GetPositionY(), dropOff.GetPositionZ(),
+                    dropOff.GetOrientation());
+                PendingWalk walk;
+                walk.MapId = mapId;
+                walk.X = x; walk.Y = y; walk.Z = z;
+                walk.DueMs = NowMs() + 2500;
+                _pendingWalks[player->GetGUID().GetCounter()] = walk;
+                AuditLog("DROPOFF", "player=" + player->GetName() + " map=" + std::to_string(mapId) +
+                    " x=" + std::to_string(dropOff.GetPositionX()) + " y=" + std::to_string(dropOff.GetPositionY()) +
+                    " walk=" + std::to_string(dropOff.GetExactDist2d(x, y)));
+                return;
+            }
+            AuditLog("DROPOFF", "player=" + player->GetName() + " none found, teleporting map=" + std::to_string(mapId));
+        }
+
+        if (teleport || !sameMap || !_useMovePoint)
         {
             if (player->IsInCombat())
                 player->CombatStop(true);
@@ -1592,6 +1647,307 @@ namespace PvPLife
         }
         else
             player->GetMotionMaster()->MovePoint(0, x, y, z);
+    }
+
+    void Manager::WalkBot(Player* player, uint32 mapId, float x, float y, float z)
+    {
+        if (!player || !player->IsAlive() || player->GetMapId() != mapId)
+            return;
+        // The duel "stay" strategy halts movement it did not start unless a stay position is set, and
+        // walks the bot back to that position itself (pathfinding) when it is.
+        if (PlayerbotAI* ai = GET_PLAYERBOT_AI(player))
+            if (ai->HasStrategy("stay", BOT_STATE_NON_COMBAT))
+                ai->GetAiObjectContext()->GetValue<PositionMap&>("position")->Get()["stay"].Set(x, y, z, mapId);
+        // Already on its way: the leash re-checks every GuardIntervalMs and must not restart the walk.
+        if (player->isMoving() && player->GetMotionMaster()->GetCurrentMovementGeneratorType() == POINT_MOTION_TYPE)
+            return;
+        player->GetMotionMaster()->MovePoint(0, x, y, z);
+    }
+
+    bool Manager::FindDropOff(Player* bot, uint32 mapId, float tx, float ty, float tz, Position& dropOff) const
+    {
+        Map* map = sMapMgr->FindBaseNonInstanceMap(mapId);
+        if (!map || map->Instanceable())
+            return false;
+
+        // Paths, heights and creatures are only known where a grid is loaded, so measure from someone
+        // already standing near the destination. Nobody there means nobody to see an arrival either.
+        Player* anchor = nullptr;
+        std::vector<Player*> watchers;
+        for (auto const& ref : map->GetPlayers())
+        {
+            Player* p = ref.GetSource();
+            if (!p || p == bot || !p->IsInWorld() || p->IsBeingTeleported())
+                continue;
+            float d = p->GetExactDist2d(tx, ty);
+            if (d > 250.0f)
+                continue;
+            if (IsHumanPlayer(p))
+                watchers.push_back(p);
+            if (d < 60.0f && p->IsAlive() && !p->IsFlying() && (!anchor || d < anchor->GetExactDist2d(tx, ty)))
+                anchor = p;
+        }
+        if (!anchor)
+            return false;
+
+        // Hostile creatures that would pull the bot on its way in.
+        std::list<Unit*> units;
+        float searchRadius = anchor->GetExactDist2d(tx, ty) + DropOffMaxDistance + 30.0f;
+        Acore::AnyUnitInObjectRangeCheck check(anchor, searchRadius);
+        Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(anchor, units, check);
+        Cell::VisitObjects(anchor, searcher, searchRadius);
+        std::vector<Position> hostiles;
+        for (Unit* unit : units)
+        {
+            Creature* creature = unit->ToCreature();
+            if (!creature || creature->IsCritter() || creature->IsTotem() || creature->IsPet() ||
+                creature->GetReactState() != REACT_AGGRESSIVE || !creature->IsHostileTo(bot) ||
+                creature->GetLevel() + 10 < bot->GetLevel())
+                continue;
+            hostiles.push_back(creature->GetPosition());
+        }
+        auto nearHostile = [&](float x, float y, float radius)
+        {
+            return std::any_of(hostiles.begin(), hostiles.end(),
+                [&](Position const& h) { return h.GetExactDist2d(x, y) < radius; });
+        };
+
+        for (uint32 attempt = 0; attempt < DropOffAttempts; ++attempt)
+        {
+            float angle = frand(0.0f, 2.0f * float(M_PI));
+            float distance = frand(DropOffMinDistance, DropOffMaxDistance);
+            float cx = tx + std::cos(angle) * distance;
+            float cy = ty + std::sin(angle) * distance;
+            float cz = map->GetHeight(anchor->GetPhaseMask(), cx, cy, tz + 30.0f, true, 80.0f);
+            if (cz <= INVALID_HEIGHT + 1.0f || std::fabs(cz - tz) > 35.0f)
+                continue;
+            if (map->IsInWater(anchor->GetPhaseMask(), cx, cy, cz, bot->GetCollisionHeight()))
+                continue;
+
+            // Out of sight: nobody close, and nobody in range with a clear line to it.
+            bool seen = std::any_of(watchers.begin(), watchers.end(), [&](Player* w)
+            {
+                float d = w->GetExactDist(cx, cy, cz);
+                return d < 45.0f || (d < 110.0f && w->IsWithinLOS(cx, cy, cz + 2.0f));
+            });
+            if (seen || nearHostile(cx, cy, 30.0f))
+                continue;
+
+            // A plain walkable route: no partial path, no long detour around a cliff, no ledge drops,
+            // no hostile camp beside the road.
+            PathGenerator path(anchor);
+            if (!path.CalculatePath(cx, cy, cz, tx, ty, tz, false) || path.GetPathType() != PATHFIND_NORMAL)
+                continue;
+            Movement::PointsArray const& points = path.GetPath();
+            if (points.size() < 2)
+                continue;
+            float length = 0.0f;
+            bool clear = true;
+            for (size_t i = 1; i < points.size() && clear; ++i)
+            {
+                G3D::Vector3 const& a = points[i - 1];
+                G3D::Vector3 const& b = points[i];
+                length += (b - a).length();
+                if (std::fabs(b.z - a.z) > 4.5f || nearHostile(b.x, b.y, 20.0f))
+                    clear = false;
+            }
+            if (!clear || length > distance * 1.6f + 15.0f)
+                continue;
+
+            dropOff.Relocate(cx, cy, cz + 0.5f, std::atan2(ty - cy, tx - cx));
+            return true;
+        }
+        return false;
+    }
+
+    bool Manager::IsLeasedParticipant(uint32 guidLow) const
+    {
+        for (ActiveEvent const& event : _activeEvents)
+            if (!event.Closing)
+                for (Participant const& part : event.Members)
+                    if (part.Bot.GuidLow == guidLow)
+                        return PlayerbotsLife::ValidateActiveLease(part.Token);
+        return false;
+    }
+
+    void Manager::ProcessPendingWalks()
+    {
+        if (_pendingWalks.empty())
+            return;
+        uint64 now = NowMs();
+        for (auto it = _pendingWalks.begin(); it != _pendingWalks.end();)
+        {
+            PendingWalk& walk = it->second;
+            Player* bot = FindPlayer(it->first);
+            if (!bot || bot->IsBeingTeleported() || !bot->IsInWorld())
+            {
+                // A cross-map teleport takes a moment; give up on one that never lands.
+                if (now > walk.DueMs + 20000)
+                    it = _pendingWalks.erase(it);
+                else
+                    ++it;
+                continue;
+            }
+            if (now < walk.DueMs)
+            {
+                ++it;
+                continue;
+            }
+            if (bot->GetMapId() != walk.MapId || !bot->IsAlive() || IsHumanControlled(bot) || !IsLeasedParticipant(it->first))
+            {
+                it = _pendingWalks.erase(it);
+                continue;
+            }
+            // Ride the rest of the way. The mount action picks a flying mount where the zone allows one.
+            if (!walk.MountTried && !bot->IsMounted() && bot->GetExactDist2d(walk.X, walk.Y) > MountUpDistance)
+            {
+                walk.MountTried = true;
+                if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
+                    ai->DoSpecificAction("check mount state", Event(), true);
+                if (bot->IsNonMeleeSpellCast(false))
+                {
+                    walk.DueMs = now + 1800; // let the mount cast finish before moving
+                    _dismountOnArrival.insert(it->first);
+                    ++it;
+                    continue;
+                }
+            }
+            if (bot->IsMounted())
+                _dismountOnArrival.insert(it->first);
+            WalkBot(bot, walk.MapId, walk.X, walk.Y, walk.Z);
+            it = _pendingWalks.erase(it);
+        }
+    }
+
+    void Manager::UpdateDuelFootwork()
+    {
+        if (!_footworkEnable)
+            return;
+        if (_footworkNextMs.size() > 1024)
+            _footworkNextMs.clear();
+        uint64 now = NowMs();
+        for (ActiveEvent const& event : _activeEvents)
+        {
+            if (event.Closing || event.EventZone.Type != ActivityType::Duel)
+                continue;
+            for (Participant const& participant : event.Members)
+            {
+                if (!participant.Deployed)
+                    continue;
+                Player* bot = FindPlayer(participant.Bot.GuidLow);
+                if (!bot || !bot->duel || bot->duel->State != DUEL_STATE_IN_PROGRESS || IsHumanControlled(bot))
+                    continue;
+                Player* opponent = bot->duel->Opponent;
+                if (!opponent || !opponent->IsInWorld() || opponent->GetMap() != bot->GetMap())
+                    continue;
+                uint64& next = _footworkNextMs[participant.Bot.GuidLow];
+                if (next > now)
+                    continue;
+                next = now + urand(_footworkIntervalMinMs, _footworkIntervalMaxMs);
+                // Never cut a cast short, and leave control effects and mounts alone.
+                if (!bot->IsAlive() || !opponent->IsAlive() || bot->IsNonMeleeSpellCast(false) || bot->IsMounted() ||
+                    bot->IsFalling() || bot->IsInWater() || bot->IsInFlight() ||
+                    bot->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING |
+                        UNIT_STATE_CASTING | UNIT_STATE_JUMPING | UNIT_STATE_CHARGING))
+                    continue;
+                DuelFootwork(bot, opponent, participant);
+            }
+        }
+    }
+
+    void Manager::DuelFootwork(Player* bot, Player* opponent, Participant const& participant)
+    {
+        float distance = bot->GetExactDist2d(opponent);
+        float away = opponent->GetAngle(bot); // from the opponent toward this bot
+        float side = urand(0, 1) ? 1.0f : -1.0f;
+        bool jump = urand(1, 100) <= _footworkJumpChance;
+        float angle = away;
+        float radius = distance;
+
+        if (PlayerbotAI::IsRanged(bot))
+        {
+            if (distance < 10.0f)
+                radius = distance + frand(6.0f, 9.0f);           // back off, often with a jump
+            else if (distance <= 32.0f)
+            {
+                angle = away + side * frand(4.0f, 7.0f) / distance; // a few yards sideways, same spacing
+                radius = std::clamp(distance + frand(-2.0f, 2.0f), 18.0f, 30.0f);
+            }
+            else
+                return; // out of range: the combat AI closes in
+        }
+        else
+        {
+            if (distance > 7.0f && distance < 25.0f && jump)
+                radius = std::max(distance - frand(5.0f, 7.0f), 2.0f); // leap while closing
+            else if (distance <= 7.0f)
+            {
+                angle = away + side * frand(0.6f, 1.3f);         // circle the opponent
+                radius = frand(1.5f, 3.0f);
+            }
+            else
+                return; // the combat AI's own chase covers it
+        }
+
+        float x = opponent->GetPositionX() + std::cos(angle) * radius;
+        float y = opponent->GetPositionY() + std::sin(angle) * radius;
+        float z = bot->GetPositionZ();
+        if (!bot->GetMap()->CanReachPositionAndGetValidCoords(bot, x, y, z) || std::fabs(z - bot->GetPositionZ()) > 3.0f)
+            return;
+        // Footwork never carries a bot out past its own leash.
+        if (std::hypot(x - participant.ActivityX, y - participant.ActivityY) > float(_duelLeashRadius) - 5.0f)
+            return;
+        float step = bot->GetExactDist2d(x, y);
+        if (step < 1.0f)
+            return;
+        if (jump && step <= 9.0f)
+            bot->GetMotionMaster()->MoveJump(x, y, z, std::max(step / 0.83f, 2.0f), 7.96f); // a player's jump arc
+        else
+            bot->GetMotionMaster()->MovePoint(0, x, y, z, FORCED_MOVEMENT_NONE, 0.0f, 0.0f, false);
+    }
+
+    void Manager::KeepLeasedLevelsFixed()
+    {
+        // mod-playerbots' level brackets re-level a random bot in place (realm 2026-10-12: a leased level 9
+        // dinged to 63 mid-duel-event). Its exclude lists are by name and also written by mod-hearthside-chat,
+        // so only names added here are ever taken back out.
+        std::unordered_set<std::string> leased;
+        std::unordered_set<uint32> leasedGuids;
+        for (ActiveEvent const& event : _activeEvents)
+            for (Participant const& participant : event.Members)
+                if (participant.Deployed && PlayerbotsLife::ValidateActiveLease(participant.Token))
+                {
+                    leased.insert(participant.Bot.Name);
+                    leasedGuids.insert(participant.Bot.GuidLow);
+                }
+        for (auto it = _dismountOnArrival.begin(); it != _dismountOnArrival.end();)
+            it = leasedGuids.count(*it) ? std::next(it) : _dismountOnArrival.erase(it);
+
+        auto& brackets = sPlayerbotAIConfig.LevelBracketsExcludeNames;
+        auto& resets = sPlayerbotAIConfig.ResetBotLevelExcludeNames;
+        for (std::string const& name : leased)
+        {
+            bool added = false;
+            for (auto* list : { &brackets, &resets })
+                if (std::find(list->begin(), list->end(), name) == list->end())
+                {
+                    list->push_back(name);
+                    added = true;
+                }
+            if (added)
+                _levelExcludeNamesAdded.insert(name);
+        }
+        for (auto it = _levelExcludeNamesAdded.begin(); it != _levelExcludeNamesAdded.end();)
+        {
+            if (leased.count(*it))
+            {
+                ++it;
+                continue;
+            }
+            for (auto* list : { &brackets, &resets })
+                list->erase(std::remove(list->begin(), list->end(), *it), list->end());
+            it = _levelExcludeNamesAdded.erase(it);
+        }
     }
 
     void Manager::EngageTarget(Player* bot, Player* target)
@@ -2431,7 +2787,7 @@ namespace PvPLife
             AuditLog("MOVE", "event=" + std::to_string(step.EventId) + " player=" + step.Name +
                 " guid=" + std::to_string(step.GuidLow) + " map=" + std::to_string(step.MapId) +
                 " x=" + std::to_string(step.X) + " y=" + std::to_string(step.Y) + " z=" + std::to_string(step.Z) +
-                " mode=" + (step.Teleport ? "teleport" : "movepoint"));
+                " mode=" + (step.Teleport ? (_dropOffArrival ? "arrive" : "teleport") : "movepoint"));
         }
         _moveQueue.swap(keep);
     }
@@ -3016,6 +3372,14 @@ namespace PvPLife
                     PositionMap& positions = ai->GetAiObjectContext()->GetValue<PositionMap&>("position")->Get();
                     positions["stay"].Set(participant.ActivityX, participant.ActivityY, participant.ActivityZ,
                         event.EventZone.MapId);
+                }
+
+                // Rode in from a drop-off: get off at the spot.
+                if (_dismountOnArrival.count(participant.Bot.GuidLow) &&
+                    bot->GetDistance2d(participant.ActivityX, participant.ActivityY) <= 6.0f)
+                {
+                    bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+                    _dismountOnArrival.erase(participant.Bot.GuidLow);
                 }
 
                 if (bot->isMoving() && bot->GetDistance2d(participant.ActivityX, participant.ActivityY) <= 3.0f)
@@ -3682,6 +4046,7 @@ namespace PvPLife
         ProcessAdmissionGrants();
         StartPendingRaidResponses();
         ProcessMoveQueue();
+        ProcessPendingWalks();
         ProcessDuelQueue();
         ProcessEngagementQueue();
         ProcessChatQueue();
@@ -3692,6 +4057,7 @@ namespace PvPLife
         }
         else
             _duelGuardTimerMs -= diff;
+        UpdateDuelFootwork();
         if (managementTick)
         {
             uint32 nowSec = GameTimeSeconds();
@@ -3711,6 +4077,7 @@ namespace PvPLife
             TryStartFactionCampaign();
             MaintainBotDuels();
             ProcessRealPlayerChallenges();
+            KeepLeasedLevelsFixed();
         }
     }
 
