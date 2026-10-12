@@ -7,9 +7,11 @@
 #include "PvPLifeMgr.h"
 #include "PvPLifeDuelSelection.h"
 #include "PvPLifeDuelRequestPolicy.h"
+#include "PvPLifeFootwork.h"
 #include "PvPLifeAudit.h"
 #include "LifeBotReservation.h"
 
+#include "AiFactory.h"
 #include "BattlefieldMgr.h"
 #include "CellImpl.h"
 #include "Chat.h"
@@ -377,10 +379,11 @@ namespace PvPLife
         _duelPairDelayMax = sConfigMgr->GetOption<uint32>("PvPLife.Duel.PairDelayMaxSeconds", 18);
         _duelLeashRadius = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.LeashRadius", 40), 10, 1000);
         _duelGuardIntervalMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.GuardIntervalMs", 1000), 250, 5000);
-        _footworkEnable = sConfigMgr->GetOption<bool>("PvPLife.Duel.Footwork.Enable", true);
-        _footworkIntervalMinMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.Footwork.IntervalMinMs", 1500), 500, 30000);
-        _footworkIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.Footwork.IntervalMaxMs", 4000), _footworkIntervalMinMs, 60000);
-        _footworkJumpChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Duel.Footwork.JumpChance", 35));
+        _footworkDuels = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Duels", true);
+        _footworkWorldPvp = sConfigMgr->GetOption<bool>("PvPLife.Footwork.WorldPvP", true);
+        _footworkIntervalMinMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMinMs", 1500), 500, 30000);
+        _footworkIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMaxMs", 4000), _footworkIntervalMinMs, 60000);
+        _footworkJumpChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.JumpChance", 35));
         _challengeRealPlayers = sConfigMgr->GetOption<bool>("PvPLife.Duel.ChallengeRealPlayers", true);
         _realPlayerChallengeChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Duel.PlayerChallengeChance", 25));
         _realPlayerScanRadius = std::min<uint32>(1000, sConfigMgr->GetOption<uint32>("PvPLife.Duel.PlayerScanRadius", 55));
@@ -1819,27 +1822,53 @@ namespace PvPLife
         }
     }
 
-    void Manager::UpdateDuelFootwork()
+    void Manager::UpdateFootwork()
     {
-        if (!_footworkEnable)
+        if (!_footworkDuels && !_footworkWorldPvp)
             return;
         if (_footworkNextMs.size() > 1024)
             _footworkNextMs.clear();
         uint64 now = NowMs();
         for (ActiveEvent const& event : _activeEvents)
         {
-            if (event.Closing || event.EventZone.Type != ActivityType::Duel)
+            bool duelEvent = event.EventZone.Type == ActivityType::Duel;
+            if (event.Closing || (duelEvent ? !_footworkDuels : !_footworkWorldPvp))
                 continue;
             for (Participant const& participant : event.Members)
             {
                 if (!participant.Deployed)
                     continue;
                 Player* bot = FindPlayer(participant.Bot.GuidLow);
-                if (!bot || !bot->duel || bot->duel->State != DUEL_STATE_IN_PROGRESS || IsHumanControlled(bot))
+                if (!bot || !bot->IsInWorld() || IsHumanControlled(bot))
                     continue;
-                Player* opponent = bot->duel->Opponent;
+
+                // Who it is fighting, and the ground it must stay on.
+                Player* opponent = nullptr;
+                FootworkBound bound;
+                if (duelEvent)
+                {
+                    if (!bot->duel || bot->duel->State != DUEL_STATE_IN_PROGRESS)
+                        continue;
+                    opponent = bot->duel->Opponent;
+                    // Out of bounds is measured from the duel flag: past 50 yards a 10-second countdown
+                    // starts, back inside 40 cancels it (Player::CheckDuelDistance).
+                    GameObject* flag = bot->GetMap()->GetGameObject(bot->GetGuidValue(PLAYER_DUEL_ARBITER));
+                    bound.X = flag ? flag->GetPositionX() : participant.ActivityX;
+                    bound.Y = flag ? flag->GetPositionY() : participant.ActivityY;
+                    bound.Radius = flag ? 38.0f : float(_duelLeashRadius) - 2.0f;
+                }
+                else
+                {
+                    if (!bot->IsInCombat())
+                        continue;
+                    Unit* victim = bot->GetVictim();
+                    opponent = victim ? victim->ToPlayer() : nullptr;
+                    if (opponent && bot->GetExactDist2d(opponent) > 40.0f)
+                        opponent = nullptr;
+                }
                 if (!opponent || !opponent->IsInWorld() || opponent->GetMap() != bot->GetMap())
                     continue;
+
                 uint64& next = _footworkNextMs[participant.Bot.GuidLow];
                 if (next > now)
                     continue;
@@ -1850,60 +1879,135 @@ namespace PvPLife
                     bot->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING |
                         UNIT_STATE_CASTING | UNIT_STATE_JUMPING | UNIT_STATE_CHARGING))
                     continue;
-                DuelFootwork(bot, opponent, participant);
+                Footwork(bot, opponent, bound);
             }
         }
     }
 
-    void Manager::DuelFootwork(Player* bot, Player* opponent, Participant const& participant)
+    namespace
     {
-        float distance = bot->GetExactDist2d(opponent);
-        float away = opponent->GetAngle(bot); // from the opponent toward this bot
-        float side = urand(0, 1) ? 1.0f : -1.0f;
-        bool jump = urand(1, 100) <= _footworkJumpChance;
-        float angle = away;
-        float radius = distance;
-
-        if (PlayerbotAI::IsRanged(bot))
+        // The first spell on the list the bot can cast at this moment (known, off cooldown, in range,
+        // resources), cast. nullptr when none could be.
+        char const* CastFirst(PlayerbotAI* ai, Player* bot, Player* opponent, FootworkSpell const (&spells)[MaxFootworkSpells])
         {
-            if (distance < 10.0f)
-                radius = distance + frand(6.0f, 9.0f);           // back off, often with a jump
-            else if (distance <= 32.0f)
+            for (FootworkSpell const& spell : spells)
             {
-                angle = away + side * frand(4.0f, 7.0f) / distance; // a few yards sideways, same spacing
-                radius = std::clamp(distance + frand(-2.0f, 2.0f), 18.0f, 30.0f);
+                if (!spell.Name)
+                    break;
+                Unit* target = spell.SelfCast ? static_cast<Unit*>(bot) : static_cast<Unit*>(opponent);
+                if (ai->CanCastSpell(spell.Name, target) && ai->CastSpell(spell.Name, target))
+                    return spell.Name;
             }
-            else
-                return; // out of range: the combat AI closes in
-        }
-        else
-        {
-            if (distance > 7.0f && distance < 25.0f && jump)
-                radius = std::max(distance - frand(5.0f, 7.0f), 2.0f); // leap while closing
-            else if (distance <= 7.0f)
-            {
-                angle = away + side * frand(0.6f, 1.3f);         // circle the opponent
-                radius = frand(1.5f, 3.0f);
-            }
-            else
-                return; // the combat AI's own chase covers it
+            return nullptr;
         }
 
-        float x = opponent->GetPositionX() + std::cos(angle) * radius;
-        float y = opponent->GetPositionY() + std::sin(angle) * radius;
+        // Rooted, frozen, stunned, feared, disoriented or slowed: the window a caster moves in.
+        bool IsControlled(Player* player)
+        {
+            return player->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_STUNNED | UNIT_STATE_FLEEING | UNIT_STATE_CONFUSED) ||
+                player->HasRootAura() || player->isFrozen() || player->HasAuraType(SPELL_AURA_MOD_DECREASE_SPEED);
+        }
+    }
+
+    bool Manager::FootworkStep(Player* bot, float angle, float distance, Position const& from, bool jump,
+        FootworkBound const& bound) const
+    {
+        float x = from.GetPositionX() + std::cos(angle) * distance;
+        float y = from.GetPositionY() + std::sin(angle) * distance;
         float z = bot->GetPositionZ();
         if (!bot->GetMap()->CanReachPositionAndGetValidCoords(bot, x, y, z) || std::fabs(z - bot->GetPositionZ()) > 3.0f)
-            return;
-        // Footwork never carries a bot out past its own leash.
-        if (std::hypot(x - participant.ActivityX, y - participant.ActivityY) > float(_duelLeashRadius) - 5.0f)
-            return;
+            return false;
+        if (bound.Radius > 0.0f && std::hypot(x - bound.X, y - bound.Y) > bound.Radius)
+            return false;
         float step = bot->GetExactDist2d(x, y);
         if (step < 1.0f)
-            return;
+            return false;
         if (jump && step <= 9.0f)
             bot->GetMotionMaster()->MoveJump(x, y, z, std::max(step / 0.83f, 2.0f), 7.96f); // a player's jump arc
         else
             bot->GetMotionMaster()->MovePoint(0, x, y, z, FORCED_MOVEMENT_NONE, 0.0f, 0.0f, false);
+        return true;
+    }
+
+    void Manager::Footwork(Player* bot, Player* opponent, FootworkBound const& bound)
+    {
+        PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+        if (!ai)
+            return;
+        FootworkProfile const& profile = FootworkProfileFor(bot->getClass(), AiFactory::GetPlayerSpecTab(bot));
+        float distance = bot->GetExactDist2d(opponent);
+        float away = opponent->GetAngle(bot); // from the opponent toward this bot
+        float side = urand(0, 1) ? 1.0f : -1.0f;
+        bool jump = urand(1, 100) <= _footworkJumpChance;
+        bool controlled = IsControlled(opponent);
+        Position const& them = opponent->GetPosition();
+
+        // Back inside the duel area before anything else. A caster walks it, a melee may jump it.
+        if (bound.Radius > 0.0f && bot->GetExactDist2d(bound.X, bound.Y) > bound.Radius - 4.0f)
+        {
+            Position centre(bound.X, bound.Y, bot->GetPositionZ());
+            FootworkStep(bot, bot->GetAngle(&centre), frand(6.0f, 9.0f), bot->GetPosition(), jump && !profile.HardCaster, FootworkBound());
+            return;
+        }
+
+        if (profile.MinRange > 0.0f)
+        {
+            float tooClose = profile.MinRange * 0.5f;
+            float mid = (profile.MinRange + profile.MaxRange) * 0.5f;
+            if (distance < tooClose)
+            {
+                // Distance only once the opponent is held: running from an uncontrolled melee just
+                // trades casting for a chase neither side wins.
+                if (controlled)
+                {
+                    FootworkStep(bot, away + frand(-0.4f, 0.4f), std::min(mid, distance + 9.0f), them, jump, bound);
+                    return;
+                }
+                if (CastFirst(ai, bot, opponent, profile.Controls))
+                    return;
+                for (FootworkSpell const& escape : profile.Escapes)
+                {
+                    if (!escape.Name)
+                        break;
+                    if (!ai->CanCastSpell(escape.Name, bot))
+                        continue;
+                    // Blink carries the caster forward, Disengage leaps it backward.
+                    if (std::string(escape.Name) == "disengage")
+                        bot->SetFacingToObject(opponent);
+                    else
+                        bot->SetFacingTo(away);
+                    if (ai->CastSpell(escape.Name, bot))
+                        return;
+                }
+                if (!profile.HardCaster)
+                    FootworkStep(bot, away + side * frand(0.8f, 1.4f), distance + frand(3.0f, 5.0f), them, jump, bound);
+                return; // a caster with nothing up stands and casts
+            }
+            // In its band: a spec that fights with instants keeps moving, a caster keeps casting.
+            if (distance <= profile.MaxRange && !profile.HardCaster)
+                FootworkStep(bot, away + side * frand(4.0f, 7.0f) / distance,
+                    std::clamp(distance + frand(-2.0f, 2.0f), profile.MinRange, profile.MaxRange), them, jump, bound);
+            return; // out of range: the combat AI closes in
+        }
+
+        // Melee.
+        if (distance > 8.0f && distance <= 25.0f)
+        {
+            if (CastFirst(ai, bot, opponent, profile.Closers))
+                return;
+            if (jump && bot->isMoving())
+                FootworkStep(bot, away, std::max(distance - frand(5.0f, 7.0f), 2.0f), them, true, bound); // leap while closing
+            return;
+        }
+        if (distance > 7.0f)
+            return; // the combat AI's own chase covers it
+        if (profile.WantsBehind && opponent->HasInArc(float(M_PI), bot))
+        {
+            FootworkStep(bot, opponent->GetOrientation() + float(M_PI) + frand(-0.5f, 0.5f), frand(1.5f, 2.5f), them, jump, bound);
+            return;
+        }
+        if (urand(1, 100) <= 40)
+            FootworkStep(bot, away + side * frand(0.6f, 1.3f), frand(1.5f, 3.0f), them, jump, bound); // circle
     }
 
     void Manager::KeepLeasedLevelsFixed()
@@ -4057,7 +4161,7 @@ namespace PvPLife
         }
         else
             _duelGuardTimerMs -= diff;
-        UpdateDuelFootwork();
+        UpdateFootwork();
         if (managementTick)
         {
             uint32 nowSec = GameTimeSeconds();

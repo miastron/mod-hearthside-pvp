@@ -140,10 +140,17 @@ namespace PvPLife
         void ProcessRealPlayerChallenges();
         void MaintainDuelParticipants();
         void MaintainBotDuels();
-        // Strafes, hops and spacing for leased bots mid-duel; playerbots' own combat AI only closes
-        // to range or flees (PvPLife.Duel.Footwork.*).
-        void UpdateDuelFootwork();
-        void DuelFootwork(Player* bot, Player* opponent, Participant const& participant);
+        // Player-like movement for leased bots fighting a player, by class and spec
+        // (PvPLifeFootwork.h, PvPLife.Footwork.*); playerbots' own combat AI only closes to range or flees.
+        struct FootworkBound
+        {
+            float X = 0.0f, Y = 0.0f;
+            float Radius = 0.0f; // 0 = unbounded
+        };
+        void UpdateFootwork();
+        void Footwork(Player* bot, Player* opponent, FootworkBound const& bound);
+        bool FootworkStep(Player* bot, float angle, float distance, Position const& from, bool jump,
+            FootworkBound const& bound) const;
         // Keeps mod-playerbots' level brackets from re-leveling a bot while it is leased.
         void KeepLeasedLevelsFixed();
         void ProcessReleasingParticipants();
@@ -254,7 +261,8 @@ namespace PvPLife
         uint32 _botChallengeCooldownSeconds = 180;
         uint32 _botDuelCooldownSeconds = 45;
         uint32 _botDuelMaxLevelDifference = 5;
-        bool _footworkEnable = true;
+        bool _footworkDuels = true;
+        bool _footworkWorldPvp = true;
         uint32 _footworkIntervalMinMs = 1500;
         uint32 _footworkIntervalMaxMs = 4000;
         uint32 _footworkJumpChance = 35;

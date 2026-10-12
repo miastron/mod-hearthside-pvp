@@ -373,28 +373,34 @@ PvPLife.Duel.LeashRadius = 40
 PvPLife.Duel.GuardIntervalMs = 1000
 
 #
-#   PvPLife.Duel.Footwork.Enable
-#       Description: Make leased bots move like players during a duel: casters back off when crowded and
-#                    strafe at range, melee circle their opponent and leap while closing, both with jumps.
-#                    Never during a cast, a stun/root/fear, or past the leash.
-#       Default:     1 (Enabled)
+#   PvPLife.Footwork.Duels / PvPLife.Footwork.WorldPvP
+#       Description: Make leased bots move like players while fighting a player, by class and spec
+#                    (src/PvPLifeFootwork.h, from docs/duel-tactics-3.3.5a.md). Casters stand and cast and
+#                    only reposition through a window (Frost Nova, Fear, Psychic Scream, Wing Clip...) or an
+#                    escape (Blink, Disengage); hunters keep out of the dead zone; melee use gap-closers
+#                    (Charge, Intercept, Shadowstep, Death Grip, Feral Charge), rogues and cats get behind,
+#                    and melee circle their target. Never during a cast or a stun/root/fear. In a duel no
+#                    move leaves 38 yards of the duel flag (out of bounds is 50), and a bot near the edge
+#                    steps back in first. Duels = duel zones; WorldPvP = skirmishes and faction campaigns.
+#       Default:     1, 1 (Enabled)
 #
-PvPLife.Duel.Footwork.Enable = 1
+PvPLife.Footwork.Duels = 1
+PvPLife.Footwork.WorldPvP = 1
 
 #
-#   PvPLife.Duel.Footwork.IntervalMinMs / IntervalMaxMs
-#       Description: Random delay between one bot's footwork moves, in milliseconds.
+#   PvPLife.Footwork.IntervalMinMs / IntervalMaxMs
+#       Description: Random delay between one bot's footwork decisions, in milliseconds.
 #       Default:     1500, 4000
 #
-PvPLife.Duel.Footwork.IntervalMinMs = 1500
-PvPLife.Duel.Footwork.IntervalMaxMs = 4000
+PvPLife.Footwork.IntervalMinMs = 1500
+PvPLife.Footwork.IntervalMaxMs = 4000
 
 #
-#   PvPLife.Duel.Footwork.JumpChance
+#   PvPLife.Footwork.JumpChance
 #       Description: Percent of footwork moves made as a jump (0-100).
 #       Default:     35
 #
-PvPLife.Duel.Footwork.JumpChance = 35
+PvPLife.Footwork.JumpChance = 35
 
 #
 #   PvPLife.Duel.ChallengeRealPlayers
