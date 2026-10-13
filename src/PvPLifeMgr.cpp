@@ -2569,10 +2569,32 @@ namespace PvPLife
                 continue;
             if (event.PrepareDeadline <= now)
             {
-                EndEvent(event, "prep-timeout");
-                continue;
+                // Members still undeployed at the deadline (stuck in combat, a duel or a flight) are
+                // let go; if the ones that did deploy still meet the event's minimums, it starts
+                // without them instead of being called off.
+                uint32 attackers = static_cast<uint32>(std::count_if(event.Members.begin(), event.Members.end(),
+                    [](Participant const& part) { return part.Deployed && part.Attacker; }));
+                uint32 defenders = static_cast<uint32>(std::count_if(event.Members.begin(), event.Members.end(),
+                    [](Participant const& part) { return part.Deployed && !part.Attacker; }));
+                if (attackers < event.RequiredAttackers || defenders < event.RequiredDefenders ||
+                    attackers + defenders < std::max<uint32>(1, event.MinimumTotal))
+                {
+                    EndEvent(event, "prep-timeout");
+                    continue;
+                }
+                std::vector<uint32> late;
+                for (Participant const& part : event.Members)
+                    if (!part.Deployed)
+                        late.push_back(part.Bot.GuidLow);
+                for (uint32 guid : late)
+                    DisengageParticipant(guid);
+                LOG_INFO("module", "[PvPLife] Event #{} {} starting without {} undeployed member(s) (attackers={}, defenders={})",
+                    event.EventId, event.EventZone.Name, late.size(), attackers, defenders);
+                AuditLog("PARTIAL_START", "event=" + std::to_string(event.EventId) + " zone=" + event.EventZone.Name +
+                    " dropped=" + std::to_string(late.size()));
             }
-            if (_changesThisTick < _maxChangesPerTick)
+            // With every remaining member deployed, this starts the event.
+            if (_changesThisTick < _maxChangesPerTick || event.PrepareDeadline <= now)
                 DeployEventMembers(event, _changesThisTick, _maxChangesPerTick);
         }
         _activeEvents.erase(std::remove_if(_activeEvents.begin(), _activeEvents.end(),
