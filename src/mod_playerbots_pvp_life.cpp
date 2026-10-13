@@ -6,7 +6,6 @@
 
 #include "PvPLifeMgr.h"
 #include "LifeBotReservation.h"
-#include "LifeTelemetryBridge.h"
 
 #include "Chat.h"
 #include "CommandScript.h"
@@ -134,7 +133,6 @@ void AddPvPLifeScripts()
 
     // The active-module flag is set by Manager::LoadConfig, only while the module is enabled and
     // its tables check out.
-    PlayerbotsLife::RegisterTelemetryBridge();
     new PvPLifeWorldScript();
     new PvPLifePlayerScript();
     new PvPLifeGroupScript();

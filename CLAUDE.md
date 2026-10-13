@@ -62,8 +62,6 @@ world thread.
   `LIFE_BOT_RESERVATION_PROTOCOL_VERSION` on any change: `AddPvPLifeScripts()` calls
   `CheckProtocolVersion()`, which logs an error when another Life module registered a different
   version. Change both repos together.
-- `src/LifeTelemetryBridge.h`: header-only telemetry for the Playerbots Life dashboard, registered at
-  load.
 - `src/PvPLifeAudit.h`: async audit logger (`sPvPLifeAudit`) with its own worker thread writing
   `Logs/pvplife_audit.log`; world-thread code only enqueues.
 - `src/PvPLifeDuelSelection.h`, `src/PvPLifeDuelRequestPolicy.h`: small pure-logic helpers for duel
