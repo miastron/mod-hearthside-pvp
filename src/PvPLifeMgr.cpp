@@ -3799,6 +3799,13 @@ namespace PvPLife
             if (event.Closing || !event.FullyPrepared || event.EventZone.Type != ActivityType::Duel)
                 continue;
 
+            // Duels being fought right now, for the idle bots nearby to watch.
+            std::vector<Player*> fighting;
+            for (Participant const& participant : event.Members)
+                if (Player* duelist = FindPlayer(participant.Bot.GuidLow);
+                    duelist && duelist->duel && duelist->duel->State == DUEL_STATE_IN_PROGRESS)
+                    fighting.push_back(duelist);
+
             for (Participant const& participant : event.Members)
             {
                 if (!participant.Deployed || !PlayerbotsLife::ValidateActiveLease(participant.Token))
@@ -3877,6 +3884,18 @@ namespace PvPLife
                     bot->GetMotionMaster()->Clear();
                     bot->ClearUnitState(UNIT_STATE_CHASE);
                     bot->ClearUnitState(UNIT_STATE_FOLLOW);
+                }
+
+                // Watching a duel nearby: now and then applaud, cheer, roar or flex. About 4% a
+                // second, whatever the guard interval.
+                if (!bot->isMoving() && !fighting.empty() && BotActive(bot) &&
+                    frand(0.0f, 100.0f) < 4.0f * _duelGuardIntervalMs / 1000.0f &&
+                    std::any_of(fighting.begin(), fighting.end(), [bot](Player* duelist)
+                        { return bot->IsWithinDistInMap(duelist, 20.0f); }))
+                {
+                    static uint32 const spectateEmotes[] =
+                        { EMOTE_ONESHOT_APPLAUD, EMOTE_ONESHOT_CHEER, EMOTE_ONESHOT_ROAR, EMOTE_ONESHOT_FLEX };
+                    bot->HandleEmoteCommand(spectateEmotes[urand(0, 3)]);
                 }
             }
         }
