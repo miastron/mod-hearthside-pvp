@@ -2819,8 +2819,11 @@ namespace PvPLife
                 // A slot displaced along the lattice keeps the requested height; snap to the ground.
                 sz = GroundZ(zone.MapId, sx, sy, slot.CenterZ);
 
-                float baseAngle = zone.RallyO;
-                float offsetDist = 3.0f;
+                // Each pair faces its own way (60 degrees apart, plus a little noise) and stands a
+                // slightly different distance apart, instead of every pair lined up on RallyO.
+                float baseAngle = Position::NormalizeOrientation(zone.RallyO + float(i) * float(M_PI) / 3.0f +
+                    frand(-0.35f, 0.35f));
+                float offsetDist = 2.5f + frand(0.0f, 1.2f);
                 float ax = sx - std::cos(baseAngle) * offsetDist;
                 float ay = sy - std::sin(baseAngle) * offsetDist;
                 float az = GroundZ(zone.MapId, ax, ay, sz);
