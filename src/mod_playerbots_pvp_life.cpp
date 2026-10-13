@@ -105,8 +105,8 @@ public:
     {
         static ChatCommandTable commandTable =
         {
-            { "pvplife", HandlePvPLifeCommand, SEC_GAMEMASTER,    Console::Yes },
-            { "wpvp",    HandleWpvpCommand,    SEC_ADMINISTRATOR, Console::Yes }
+            { "pvplife", HandlePvPLifeCommand, SEC_GAMEMASTER, Console::Yes },
+            { "wpvp",    HandleWpvpCommand,    SEC_GAMEMASTER, Console::Yes }
         };
         return commandTable;
     }

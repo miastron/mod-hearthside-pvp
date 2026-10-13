@@ -69,7 +69,7 @@ PvP Life and City Life are architected for seamless, zero-conflict simultaneous 
 
 ## GM Commands Reference
 
-Both `.pvplife` (GM level) and `.wpvp` (administrator level) roots take every subcommand below; under `.wpvp`, `spot` stands for `zone`.
+Both the `.pvplife` and `.wpvp` roots (GM level) take every subcommand below; under `.wpvp`, `spot` stands for `zone`.
 
 ### Status & Diagnostics
 - `.pvplife status` (or `.wpvp status`): Overview of active events, queues, budgets, and participant counts.
