@@ -3457,9 +3457,10 @@ namespace PvPLife
                 DuelStep retry = step;
                 if (retry.RetryCount++ < DuelApproachRetries)
                 {
+                    // Come in a little off the straight line, so challengers do not all walk the same path.
                     float x, y, z;
                     target->GetNearPoint(challenger, x, y, z, challenger->GetCombatReach(),
-                        std::min(3.0f, approachDistance * 0.5f), target->GetAngle(challenger));
+                        std::min(3.0f, approachDistance * 0.5f), target->GetAngle(challenger) + frand(-0.45f, 0.45f));
                     if (PlayerbotAI* ai = GET_PLAYERBOT_AI(challenger))
                     {
                         PositionMap& positions = ai->GetAiObjectContext()->GetValue<PositionMap&>("position")->Get();
@@ -3493,6 +3494,8 @@ namespace PvPLife
             for (Player* duelist : { challenger, target })
                 if (!step.TargetIsRealPlayer || duelist == challenger)
                     duelist->RemoveAurasByType(SPELL_AURA_MOUNTED);
+            if (!step.TargetIsRealPlayer && roll_chance_i(40))
+                challenger->HandleEmoteCommand(EMOTE_ONESHOT_BOW);
             SpellCastResult result = challenger->CastSpell(target, _duelSpellId, true);
             if (result != SPELL_CAST_OK)
             {
