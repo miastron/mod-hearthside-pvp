@@ -122,6 +122,7 @@ PvPLife.Bots.Archetypes = "PVP_SERIOUS,PVP_CASUAL,TROLL_MILD,TROLL_AGGRESSIVE"
 #
 #   PvPLife.Bots.MinOnlineRequired
 #       Description: Minimum ready population required across both sides to start an activity.
+#                    Duel zones need only one pair (2 bots) regardless.
 #       Default:     3
 #
 PvPLife.Bots.MinOnlineRequired = 3

@@ -1471,6 +1471,13 @@ namespace PvPLife
             return;
         }
 
+        // Duels come in pairs: an even total split evenly, so no bot is borrowed without a partner.
+        if (zone.Type == ActivityType::Duel)
+        {
+            attackerCount = defenderCount = std::min(totalPopulation / 2, _maxBotsPerSide);
+            return;
+        }
+
         uint64 attackerWeight = static_cast<uint64>(zone.AttackersMin) + zone.AttackersMax;
         uint64 defenderWeight = static_cast<uint64>(zone.DefendersMin) + zone.DefendersMax;
         uint64 totalWeight = attackerWeight + defenderWeight;
@@ -2732,15 +2739,17 @@ namespace PvPLife
         // smaller side asked for (capped by the pair limit), not each side's own count.
         if (eventZone.Type == ActivityType::Duel && !_allowPartialTeams)
             requiredAttackers = requiredDefenders = std::min({ attackerNeed, defenderNeed, _duelPairLimit });
+        // One pair is a whole duel event, which MinOnlineRequired (default 3) would turn away.
+        uint32 requiredTotal = eventZone.Type == ActivityType::Duel ? 2 : _minOnlineRequired;
         uint32 now = GameTimeSeconds();
 
         if (attackers.size() < requiredAttackers || defenders.size() < requiredDefenders ||
-            (attackers.size() + defenders.size()) < _minOnlineRequired)
+            (attackers.size() + defenders.size()) < requiredTotal)
         {
             if (_debug)
                 LOG_INFO("module", "[PvPLife] '{}' lacks bots: attackers {}/{} defenders {}/{} total {} (min required {})",
                     zone.Name, attackers.size(), attackerNeed, defenders.size(), defenderNeed,
-                    attackers.size() + defenders.size(), _minOnlineRequired);
+                    attackers.size() + defenders.size(), requiredTotal);
             if (handler)
                 handler->PSendSysMessage("PvP Life: Insufficient eligible bots for {} (attackers {}/{}, defenders {}/{}).",
                     zone.Name, attackers.size(), attackerNeed, defenders.size(), defenderNeed);
@@ -2757,7 +2766,7 @@ namespace PvPLife
         event.DurationSeconds = urand(dmin, dmax) * MINUTE;
         event.RequiredAttackers = requiredAttackers;
         event.RequiredDefenders = requiredDefenders;
-        event.MinimumTotal = _minOnlineRequired;
+        event.MinimumTotal = requiredTotal;
         uint32 plannedMembers = static_cast<uint32>(attackers.size() + defenders.size());
         uint32 queuedWork = plannedMembers + static_cast<uint32>(_releasingParticipants.size());
         for (ActiveEvent const& queued : _activeEvents)
@@ -2922,12 +2931,12 @@ namespace PvPLife
         }
 
         if (actualAttackers < requiredAttackers || actualDefenders < requiredDefenders ||
-            (actualAttackers + actualDefenders) < _minOnlineRequired)
+            (actualAttackers + actualDefenders) < requiredTotal)
         {
             if (_debug)
                 LOG_INFO("module", "[PvPLife] '{}' aborted: usable attackers {}/{} defenders {}/{} total {} (min required {})",
                     zone.Name, actualAttackers, requiredAttackers, actualDefenders, requiredDefenders,
-                    actualAttackers + actualDefenders, _minOnlineRequired);
+                    actualAttackers + actualDefenders, requiredTotal);
             if (handler)
                 handler->PSendSysMessage("PvP Life: Insufficient usable bots for {} (attackers {}/{}, defenders {}/{}).",
                     zone.Name, actualAttackers, requiredAttackers, actualDefenders, requiredDefenders);
