@@ -1880,8 +1880,15 @@ namespace PvPLife
                     outcome = "skip:dead";
                 else if (bot->IsNonMeleeSpellCast(false) || bot->HasUnitState(UNIT_STATE_CASTING))
                     outcome = "skip:casting";
-                else if (bot->IsMounted() || bot->IsInFlight())
-                    outcome = "skip:mounted";
+                else if (bot->IsInFlight())
+                    outcome = "skip:flight";
+                else if (bot->IsMounted())
+                {
+                    // Fighting a player while mounted: get off (the duel-start dismount misses a bot
+                    // remounted by its own AI, and world PvP has no start to hook).
+                    bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+                    outcome = "dismount";
+                }
                 else if (bot->IsFalling() || bot->IsInWater() || bot->HasUnitState(UNIT_STATE_JUMPING | UNIT_STATE_CHARGING))
                     outcome = "skip:airborne";
                 else if (bot->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING))
@@ -3175,6 +3182,12 @@ namespace PvPLife
                     duelist->SetPower(power, startsEmpty ? 0 : duelist->GetMaxPower(power));
                 }
             }
+            // Nobody duels from the saddle: a bot that rode in (or that mod-playerbots mounted while it
+            // idled) would otherwise start mounted, and mounted it can neither cast nor swing
+            // (realm 2026-10-12 trace: 79% of footwork checks found the duelist still mounted).
+            for (Player* duelist : { challenger, target })
+                if (!step.TargetIsRealPlayer || duelist == challenger)
+                    duelist->RemoveAurasByType(SPELL_AURA_MOUNTED);
             SpellCastResult result = challenger->CastSpell(target, _duelSpellId, true);
             if (result != SPELL_CAST_OK)
             {
