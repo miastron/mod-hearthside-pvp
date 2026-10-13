@@ -28,7 +28,10 @@
 #include "Log.h"
 #include "Map.h"
 #include "MapMgr.h"
+#include "LastMovementValue.h"
 #include "MotionMaster.h"
+#include "MoveSpline.h"
+#include "MoveSplineInit.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "Opcodes.h"
@@ -1835,6 +1838,7 @@ namespace PvPLife
     {
         if (!_footworkDuels && !_footworkWorldPvp && !_footworkBattlegrounds)
             return;
+        ProcessFootworkChecks();
         if (_footworkNextMs.size() > 4096)
             _footworkNextMs.clear();
         uint64 now = NowMs();
@@ -1991,8 +1995,8 @@ namespace PvPLife
         }
     }
 
-    bool Manager::FootworkStep(Player* bot, float angle, float distance, Position const& from, bool jump,
-        FootworkBound const& bound) const
+    bool Manager::FootworkStep(Player* bot, Unit* face, float angle, float distance, Position const& from, bool jump,
+        FootworkBound const& bound)
     {
         float x = from.GetPositionX() + std::cos(angle) * distance;
         float y = from.GetPositionY() + std::sin(angle) * distance;
@@ -2006,11 +2010,101 @@ namespace PvPLife
         float step = bot->GetExactDist2d(x, y);
         if (step < 1.0f)
             return false;
+
+        int32 durationMs = 0;
         if (jump && step <= 9.0f)
-            bot->GetMotionMaster()->MoveJump(x, y, z, std::max(step / 0.83f, 2.0f), 7.96f); // a player's jump arc
+        {
+            // A player's jump arc, still facing the opponent.
+            float speedXY = std::max(step / 0.83f, 2.0f);
+            bot->GetMotionMaster()->MoveJump(x, y, z, speedXY, 7.96f, 0, face);
+            durationMs = int32(step / speedXY * 1000.0f);
+        }
         else
-            bot->GetMotionMaster()->MovePoint(0, x, y, z, FORCED_MOVEMENT_NONE, 0.0f, 0.0f, false);
+        {
+            // One continuous curve instead of a straight hop: interpolate around `from` (the
+            // opponent, for every move but the edge return) in angle and radius, so circling bends
+            // with the target and a back-off runs straight out. The bot keeps facing its opponent
+            // the whole way, backpedalling when it gives ground, the way a player strafes.
+            float startAngle = from.GetAngle(bot->GetPositionX(), bot->GetPositionY());
+            float startRadius = from.GetExactDist2d(bot->GetPositionX(), bot->GetPositionY());
+            float sweep = Position::NormalizeOrientation(angle - startAngle);
+            if (sweep > float(M_PI))
+                sweep -= 2.0f * float(M_PI);
+            uint32 points = std::clamp<uint32>(uint32(step / 1.5f), 2, 8);
+            Movement::PointsArray path;
+            path.push_back(G3D::Vector3(bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ()));
+            for (uint32 i = 1; i <= points; ++i)
+            {
+                float t = float(i) / float(points);
+                float pa = startAngle + sweep * t;
+                float pr = startRadius + (distance - startRadius) * t;
+                float px = i == points ? x : from.GetPositionX() + std::cos(pa) * pr;
+                float py = i == points ? y : from.GetPositionY() + std::sin(pa) * pr;
+                float pz = i == points ? z : bot->GetPositionZ();
+                if (i != points)
+                    bot->UpdateAllowedPositionZ(px, py, pz);
+                if (std::fabs(pz - path.back().z) > 2.5f)
+                    return false; // a ledge or a wall mid-curve: skip this move
+                path.push_back(G3D::Vector3(px, py, pz));
+            }
+            // Drop the chase or point movement first, or its next update relaunches over this spline.
+            bot->GetMotionMaster()->MoveIdle();
+            Movement::MoveSplineInit init(bot);
+            init.MovebyPath(path);
+            if (face)
+            {
+                init.SetFacing(face);
+                float travel = std::atan2(y - bot->GetPositionY(), x - bot->GetPositionX());
+                float awayFromFace = face->GetAngle(bot);
+                if (std::cos(travel - awayFromFace) > 0.7f)
+                    init.SetOrientationInversed(); // giving ground: backpedal
+            }
+            durationMs = init.Launch();
+        }
+
+        // Ask mod-playerbots' own movement to wait the move out rather than redirect it halfway.
+        if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
+            ai->GetAiObjectContext()->GetValue<LastMovement&>("last movement")->Get().Set(
+                bot->GetMapId(), x, y, z, bot->GetOrientation(), float(std::max(durationMs, 300)),
+                MovementPriority::MOVEMENT_FORCED);
+
+        // Measure whether anything still redirects it (PvPLife.Footwork.Trace).
+        if (_footworkTrace)
+        {
+            FootworkCheck check;
+            check.DueMs = NowMs() + uint64(std::clamp(durationMs / 2, 250, 1500));
+            check.X = x;
+            check.Y = y;
+            check.Jump = jump && step <= 9.0f;
+            _footworkChecks[bot->GetGUID().GetCounter()] = check;
+        }
         return true;
+    }
+
+    void Manager::ProcessFootworkChecks()
+    {
+        if (_footworkChecks.empty())
+            return;
+        uint64 now = NowMs();
+        for (auto it = _footworkChecks.begin(); it != _footworkChecks.end();)
+        {
+            if (it->second.DueMs > now)
+            {
+                ++it;
+                continue;
+            }
+            if (Player* bot = FindPlayer(it->first); bot && bot->IsInWorld())
+            {
+                // onpath: the spline footwork launched is still the one running.
+                bool running = !bot->movespline->Finalized();
+                G3D::Vector3 dest = bot->movespline->FinalDestination();
+                bool onPath = running && std::hypot(dest.x - it->second.X, dest.y - it->second.Y) < 1.5f;
+                AuditLog("FOOTCHECK", "bot=" + bot->GetName() + " jump=" + std::to_string(it->second.Jump ? 1 : 0) +
+                    " onpath=" + std::to_string(onPath ? 1 : 0) + " running=" + std::to_string(running ? 1 : 0) +
+                    " mm=" + std::to_string(int(bot->GetMotionMaster()->GetCurrentMovementGeneratorType())));
+            }
+            it = _footworkChecks.erase(it);
+        }
     }
 
     char const* Manager::Footwork(Player* bot, Player* opponent, FootworkBound const& bound)
@@ -2032,7 +2126,7 @@ namespace PvPLife
         {
             Position centre = offHome ? Position(bound.HomeX, bound.HomeY, bot->GetPositionZ())
                                       : Position(bound.X, bound.Y, bot->GetPositionZ());
-            return FootworkStep(bot, bot->GetAngle(&centre), frand(6.0f, 9.0f), bot->GetPosition(), jump && !profile.HardCaster, FootworkBound())
+            return FootworkStep(bot, opponent, bot->GetAngle(&centre), frand(6.0f, 9.0f), bot->GetPosition(), jump && !profile.HardCaster, FootworkBound())
                 ? "edge:back-in" : "edge:blocked";
         }
 
@@ -2046,7 +2140,7 @@ namespace PvPLife
                 // trades casting for a chase neither side wins.
                 if (controlled)
                 {
-                    return FootworkStep(bot, away + frand(-0.4f, 0.4f), std::min(mid, distance + 9.0f), them, jump, bound)
+                    return FootworkStep(bot, opponent, away + frand(-0.4f, 0.4f), std::min(mid, distance + 9.0f), them, jump, bound)
                         ? "close:back-off" : "close:back-off-blocked";
                 }
                 if (char const* cast = CastFirst(ai, bot, opponent, profile.Controls))
@@ -2066,7 +2160,7 @@ namespace PvPLife
                         return escape.Name;
                 }
                 if (!profile.HardCaster)
-                    return FootworkStep(bot, away + side * frand(0.8f, 1.4f), distance + frand(3.0f, 5.0f), them, jump, bound)
+                    return FootworkStep(bot, opponent, away + side * frand(0.8f, 1.4f), distance + frand(3.0f, 5.0f), them, jump, bound)
                         ? "close:sidestep" : "close:sidestep-blocked";
                 return "close:stand"; // a caster with nothing up stands and casts
             }
@@ -2079,11 +2173,11 @@ namespace PvPLife
                 // moment's delay on the next cast, never a run (the anti-dance rule above stands).
                 if (urand(1, 100) > 35)
                     return "band:cast";
-                return FootworkStep(bot, away + side * frand(2.0f, 4.0f) / distance,
+                return FootworkStep(bot, opponent, away + side * frand(2.0f, 4.0f) / distance,
                     std::clamp(distance + frand(-1.5f, 1.5f), profile.MinRange, profile.MaxRange), them, jump, bound)
                     ? "band:shift" : "band:shift-blocked";
             }
-            return FootworkStep(bot, away + side * frand(4.0f, 7.0f) / distance,
+            return FootworkStep(bot, opponent, away + side * frand(4.0f, 7.0f) / distance,
                 std::clamp(distance + frand(-2.0f, 2.0f), profile.MinRange, profile.MaxRange), them, jump, bound)
                 ? "band:strafe" : "band:strafe-blocked";
         }
@@ -2095,19 +2189,19 @@ namespace PvPLife
                 return cast;
             if (!jump || !bot->isMoving())
                 return "gap:ai-chase";
-            return FootworkStep(bot, away, std::max(distance - frand(5.0f, 7.0f), 2.0f), them, true, bound) // leap while closing
+            return FootworkStep(bot, opponent, away, std::max(distance - frand(5.0f, 7.0f), 2.0f), them, true, bound) // leap while closing
                 ? "gap:leap" : "gap:leap-blocked";
         }
         if (distance > 7.0f)
             return "far:ai"; // the combat AI's own chase covers it
         if (profile.WantsBehind && opponent->HasInArc(float(M_PI), bot))
         {
-            return FootworkStep(bot, opponent->GetOrientation() + float(M_PI) + frand(-0.5f, 0.5f), frand(1.5f, 2.5f), them, jump, bound)
+            return FootworkStep(bot, opponent, opponent->GetOrientation() + float(M_PI) + frand(-0.5f, 0.5f), frand(1.5f, 2.5f), them, jump, bound)
                 ? "melee:behind" : "melee:behind-blocked";
         }
         if (urand(1, 100) > 80)
             return "melee:hold";
-        return FootworkStep(bot, away + side * frand(0.6f, 1.3f), frand(1.5f, 3.0f), them, jump, bound) // circle
+        return FootworkStep(bot, opponent, away + side * frand(0.6f, 1.3f), frand(1.5f, 3.0f), them, jump, bound) // circle
             ? "melee:circle" : "melee:circle-blocked";
     }
 

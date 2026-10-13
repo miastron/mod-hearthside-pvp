@@ -20,6 +20,7 @@
 
 class ChatHandler;
 class Player;
+class Unit;
 class Field;
 
 namespace PvPLife
@@ -156,8 +157,17 @@ namespace PvPLife
         void RunFootwork(Player* bot, Player* opponent, FootworkBound const& bound, char const* context, uint64 now);
         // What it did, for PvPLife.Footwork.Trace: an action, a spell name, or why it held.
         char const* Footwork(Player* bot, Player* opponent, FootworkBound const& bound);
-        bool FootworkStep(Player* bot, float angle, float distance, Position const& from, bool jump,
-            FootworkBound const& bound) const;
+        // One footwork move: a smooth curve (or a jump) that keeps facing `face`.
+        bool FootworkStep(Player* bot, Unit* face, float angle, float distance, Position const& from, bool jump,
+            FootworkBound const& bound);
+        void ProcessFootworkChecks();
+        struct FootworkCheck
+        {
+            uint64 DueMs = 0;
+            float X = 0.0f, Y = 0.0f;
+            bool Jump = false;
+        };
+        std::unordered_map<uint32, FootworkCheck> _footworkChecks;
         // Keeps mod-playerbots' level brackets from re-leveling a bot while it is leased.
         void KeepLeasedLevelsFixed();
         void ProcessReleasingParticipants();
