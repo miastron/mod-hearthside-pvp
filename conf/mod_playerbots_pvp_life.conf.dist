@@ -390,10 +390,10 @@ PvPLife.Footwork.WorldPvP = 1
 #
 #   PvPLife.Footwork.IntervalMinMs / IntervalMaxMs
 #       Description: Random delay between one bot's footwork decisions, in milliseconds.
-#       Default:     1500, 4000
+#       Default:     1000, 2500
 #
-PvPLife.Footwork.IntervalMinMs = 1500
-PvPLife.Footwork.IntervalMaxMs = 4000
+PvPLife.Footwork.IntervalMinMs = 1000
+PvPLife.Footwork.IntervalMaxMs = 2500
 
 #
 #   PvPLife.Footwork.JumpChance

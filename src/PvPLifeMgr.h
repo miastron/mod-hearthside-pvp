@@ -265,8 +265,8 @@ namespace PvPLife
         bool _footworkDuels = true;
         bool _footworkWorldPvp = true;
         bool _footworkTrace = false;
-        uint32 _footworkIntervalMinMs = 1500;
-        uint32 _footworkIntervalMaxMs = 4000;
+        uint32 _footworkIntervalMinMs = 1000;
+        uint32 _footworkIntervalMaxMs = 2500;
         uint32 _footworkJumpChance = 35;
         std::unordered_map<uint32, uint64> _footworkNextMs;
         std::unordered_set<std::string> _levelExcludeNamesAdded;

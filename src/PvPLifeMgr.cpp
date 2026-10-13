@@ -381,8 +381,8 @@ namespace PvPLife
         _duelGuardIntervalMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.GuardIntervalMs", 1000), 250, 5000);
         _footworkDuels = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Duels", true);
         _footworkWorldPvp = sConfigMgr->GetOption<bool>("PvPLife.Footwork.WorldPvP", true);
-        _footworkIntervalMinMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMinMs", 1500), 500, 30000);
-        _footworkIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMaxMs", 4000), _footworkIntervalMinMs, 60000);
+        _footworkIntervalMinMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMinMs", 1000), 500, 30000);
+        _footworkIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMaxMs", 2500), _footworkIntervalMinMs, 60000);
         _footworkJumpChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.JumpChance", 35));
         _footworkTrace = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Trace", false);
         _challengeRealPlayers = sConfigMgr->GetOption<bool>("PvPLife.Duel.ChallengeRealPlayers", true);
@@ -2010,7 +2010,15 @@ namespace PvPLife
             if (distance > profile.MaxRange)
                 return "far:ai"; // out of range: the combat AI closes in
             if (profile.HardCaster)
-                return "band:cast";
+            {
+                // Between casts a real caster shifts a few yards or hops, then casts again: worth a
+                // moment's delay on the next cast, never a run (the anti-dance rule above stands).
+                if (urand(1, 100) > 35)
+                    return "band:cast";
+                return FootworkStep(bot, away + side * frand(2.0f, 4.0f) / distance,
+                    std::clamp(distance + frand(-1.5f, 1.5f), profile.MinRange, profile.MaxRange), them, jump, bound)
+                    ? "band:shift" : "band:shift-blocked";
+            }
             return FootworkStep(bot, away + side * frand(4.0f, 7.0f) / distance,
                 std::clamp(distance + frand(-2.0f, 2.0f), profile.MinRange, profile.MaxRange), them, jump, bound)
                 ? "band:strafe" : "band:strafe-blocked";
@@ -2033,7 +2041,7 @@ namespace PvPLife
             return FootworkStep(bot, opponent->GetOrientation() + float(M_PI) + frand(-0.5f, 0.5f), frand(1.5f, 2.5f), them, jump, bound)
                 ? "melee:behind" : "melee:behind-blocked";
         }
-        if (urand(1, 100) > 40)
+        if (urand(1, 100) > 80)
             return "melee:hold";
         return FootworkStep(bot, away + side * frand(0.6f, 1.3f), frand(1.5f, 3.0f), them, jump, bound) // circle
             ? "melee:circle" : "melee:circle-blocked";
