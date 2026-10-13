@@ -3689,7 +3689,9 @@ namespace PvPLife
                     continue;
                 }
 
-                std::vector<uint32> compatibleIndexes;
+                // Partners come from nearby: one of the two closest, so a pair does not cross the
+                // whole duel ground to meet, but the same two neighbours do not always pair either.
+                std::vector<std::pair<float, uint32>> compatibleIndexes;
                 for (uint32 i = 0; i < available.size(); ++i)
                 {
                     if (i == firstIndex)
@@ -3697,9 +3699,12 @@ namespace PvPLife
                     Player* candidate = FindPlayer(available[i]);
                     if (!candidate || a->GetTeamId() != candidate->GetTeamId())
                         continue;
+                    float distance = a->GetDistance2d(candidate);
+                    if (distance > _duelLeashRadius * 2.0f)
+                        continue;
                     uint32 levelDiff = std::abs(static_cast<int32>(a->GetLevel()) - static_cast<int32>(candidate->GetLevel()));
                     if (levelDiff <= _botDuelMaxLevelDifference)
-                        compatibleIndexes.push_back(i);
+                        compatibleIndexes.emplace_back(distance, i);
                 }
 
                 if (compatibleIndexes.empty())
@@ -3708,7 +3713,9 @@ namespace PvPLife
                     continue;
                 }
 
-                uint32 secondIndex = compatibleIndexes[urand(0, static_cast<uint32>(compatibleIndexes.size() - 1))];
+                std::sort(compatibleIndexes.begin(), compatibleIndexes.end());
+                uint32 pickLimit = std::min<uint32>(static_cast<uint32>(compatibleIndexes.size()), 2);
+                uint32 secondIndex = compatibleIndexes[urand(0, pickLimit - 1)].second;
                 uint32 second = available[secondIndex];
                 Player* b = FindPlayer(second);
 
