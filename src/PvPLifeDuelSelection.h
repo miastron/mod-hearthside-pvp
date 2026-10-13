@@ -13,16 +13,20 @@ namespace PvPLife
 {
     // Pools are already shuffled. Prefer underrepresented level bands, but only
     // reserve complete compatible pairs; never change a character's level.
-    template<class Candidate>
+    // `pickGap` draws the level gap each pair aims for: the closest gap is not the
+    // goal, since every duel at the exact same level is a tell (realm 2026-10-12:
+    // 19 vs 19, 36 vs 36 down the line).
+    template<class Candidate, class GapPicker>
     std::pair<std::vector<Candidate>, std::vector<Candidate>> SelectDiverseDuelPairs(
         std::vector<Candidate> const& attackers, std::vector<Candidate> const& defenders,
-        std::size_t maxPairs, unsigned maxDifference)
+        std::size_t maxPairs, unsigned maxDifference, GapPicker pickGap)
     {
         std::pair<std::vector<Candidate>, std::vector<Candidate>> result;
         std::unordered_set<std::uint32_t> used;
         std::array<unsigned, 3> bands{};
         while (result.first.size() < maxPairs)
         {
+            unsigned targetGap = pickGap();
             Candidate const* bestA = nullptr;
             Candidate const* bestB = nullptr;
             unsigned bestBand = 0;
@@ -40,7 +44,8 @@ namespace PvPLife
                         continue;
                     unsigned level = (unsigned(a.Level) + unsigned(b.Level)) / 2;
                     unsigned band = level < 30 ? 0 : level < 50 ? 1 : 2;
-                    unsigned score = bands[band] * 256 + difference;
+                    unsigned miss = difference > targetGap ? difference - targetGap : targetGap - difference;
+                    unsigned score = bands[band] * 256 + miss;
                     if (score < bestScore)
                     {
                         bestA = &a;

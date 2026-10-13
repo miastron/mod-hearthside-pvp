@@ -423,7 +423,7 @@ PvPLife.Footwork.Trace = 0
 #   PvPLife.Duel.PlayerChallengeCooldownSeconds - per player; shared with City Life's challenges
 #   PvPLife.Duel.BotChallengeCooldownSeconds    - per bot, after it challenged a player
 #   PvPLife.Duel.BotVsBotCooldownSeconds   - per bot, after a bot-vs-bot duel
-#   PvPLife.Duel.BotVsBotMaxLevelDifference - max level gap within a bot pair (max 80)
+#   PvPLife.Duel.BotVsBotMaxLevelDifference - max level gap within a bot pair (max 80); pairs aim for a random 0-2
 #       Cooldowns here and elsewhere in this file are capped at 604800 (one week).
 #
 PvPLife.Duel.ChallengeRealPlayers = 1
@@ -433,7 +433,7 @@ PvPLife.Duel.MaxLevelDifference = 5
 PvPLife.Duel.PlayerChallengeCooldownSeconds = 900
 PvPLife.Duel.BotChallengeCooldownSeconds = 180
 PvPLife.Duel.BotVsBotCooldownSeconds = 45
-PvPLife.Duel.BotVsBotMaxLevelDifference = 5
+PvPLife.Duel.BotVsBotMaxLevelDifference = 2
 
 ###################################################################################################
 # For the Horde / For the Alliance Campaigns

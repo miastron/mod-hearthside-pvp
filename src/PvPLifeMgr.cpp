@@ -393,7 +393,7 @@ namespace PvPLife
         _realPlayerCooldownSeconds = std::min<uint32>(MaxCooldownSeconds, sConfigMgr->GetOption<uint32>("PvPLife.Duel.PlayerChallengeCooldownSeconds", 900));
         _botChallengeCooldownSeconds = std::min<uint32>(MaxCooldownSeconds, sConfigMgr->GetOption<uint32>("PvPLife.Duel.BotChallengeCooldownSeconds", 180));
         _botDuelCooldownSeconds = std::min<uint32>(MaxCooldownSeconds, sConfigMgr->GetOption<uint32>("PvPLife.Duel.BotVsBotCooldownSeconds", 45));
-        _botDuelMaxLevelDifference = std::min<uint32>(80, sConfigMgr->GetOption<uint32>("PvPLife.Duel.BotVsBotMaxLevelDifference", 5));
+        _botDuelMaxLevelDifference = std::min<uint32>(80, sConfigMgr->GetOption<uint32>("PvPLife.Duel.BotVsBotMaxLevelDifference", 2));
 
         // 6. Campaigns & Chatter
         _forTheHordeEnable = sConfigMgr->GetOption<bool>("PvPLife.ForTheHorde.Enable", true);
@@ -1603,6 +1603,10 @@ namespace PvPLife
         constexpr uint32 DropOffAttempts = 24;
         // Riding is worth a mount cast past this.
         constexpr float MountUpDistance = 45.0f;
+        // Between duels a bot idles anywhere within this of its staging spot.
+        constexpr float DuelHomeAreaRadius = 6.0f;
+        // Mid-duel footwork never carries a bot farther than this from its staging spot.
+        constexpr float DuelFootworkHomeRadius = 25.0f;
 
         uint64 NowMs()
         {
@@ -1857,6 +1861,13 @@ namespace PvPLife
                     bound.X = flag ? flag->GetPositionX() : participant.ActivityX;
                     bound.Y = flag ? flag->GetPositionY() : participant.ActivityY;
                     bound.Radius = flag ? 38.0f : float(_duelLeashRadius) - 2.0f;
+                    // The flag spawns between the duelists wherever they stand, so a 38-yard
+                    // allowance around it lets every duel start a little farther off than the
+                    // last (realm 2026-10-12: pairs drifting onto the road). Anchor to the bot's
+                    // own staging spot as well.
+                    bound.HomeX = participant.ActivityX;
+                    bound.HomeY = participant.ActivityY;
+                    bound.HomeRadius = DuelFootworkHomeRadius;
                 }
                 else
                 {
@@ -1941,6 +1952,8 @@ namespace PvPLife
             return false;
         if (bound.Radius > 0.0f && std::hypot(x - bound.X, y - bound.Y) > bound.Radius)
             return false;
+        if (bound.HomeRadius > 0.0f && std::hypot(x - bound.HomeX, y - bound.HomeY) > bound.HomeRadius)
+            return false;
         float step = bot->GetExactDist2d(x, y);
         if (step < 1.0f)
             return false;
@@ -1965,9 +1978,11 @@ namespace PvPLife
         Position const& them = opponent->GetPosition();
 
         // Back inside the duel area before anything else. A caster walks it, a melee may jump it.
-        if (bound.Radius > 0.0f && bot->GetExactDist2d(bound.X, bound.Y) > bound.Radius - 4.0f)
+        bool offHome = bound.HomeRadius > 0.0f && bot->GetExactDist2d(bound.HomeX, bound.HomeY) > bound.HomeRadius - 3.0f;
+        if (offHome || (bound.Radius > 0.0f && bot->GetExactDist2d(bound.X, bound.Y) > bound.Radius - 4.0f))
         {
-            Position centre(bound.X, bound.Y, bot->GetPositionZ());
+            Position centre = offHome ? Position(bound.HomeX, bound.HomeY, bot->GetPositionZ())
+                                      : Position(bound.X, bound.Y, bot->GetPositionZ());
             return FootworkStep(bot, bot->GetAngle(&centre), frand(6.0f, 9.0f), bot->GetPosition(), jump && !profile.HardCaster, FootworkBound())
                 ? "edge:back-in" : "edge:blocked";
         }
@@ -2063,6 +2078,8 @@ namespace PvPLife
                 }
         for (auto it = _dismountOnArrival.begin(); it != _dismountOnArrival.end();)
             it = leasedGuids.count(*it) ? std::next(it) : _dismountOnArrival.erase(it);
+        for (auto it = _idleReturnPoint.begin(); it != _idleReturnPoint.end();)
+            it = leasedGuids.count(it->first) ? std::next(it) : _idleReturnPoint.erase(it);
 
         auto& brackets = sPlayerbotAIConfig.LevelBracketsExcludeNames;
         auto& resets = sPlayerbotAIConfig.ResetBotLevelExcludeNames;
@@ -2440,8 +2457,11 @@ namespace PvPLife
         std::vector<BotCandidate> defenders;
         if (eventZone.Type == ActivityType::Duel)
         {
+            // Same level about a third of the time, otherwise one or two apart.
+            uint32 maxGap = std::min<uint32>(2, _botDuelMaxLevelDifference);
             auto pairs = SelectDiverseDuelPairs(attackerPool, defenderPool,
-                std::min(attackerNeed, defenderNeed), _botDuelMaxLevelDifference);
+                std::min(attackerNeed, defenderNeed), _botDuelMaxLevelDifference,
+                [maxGap]() { return unsigned(urand(0, maxGap)); });
             attackers = std::move(pairs.first);
             defenders = std::move(pairs.second);
         }
@@ -3516,9 +3536,32 @@ namespace PvPLife
                         !ai->HasStrategy("stay", BOT_STATE_NON_COMBAT))
                         ApplyPvpStrategies(bot, true);
 
+                    // Home is an area, not a point: a bot inside it stays where it is, and one that
+                    // has wandered out walks back to a random spot inside it, the way a player
+                    // drifts back to roughly where they were rather than onto the same square.
                     PositionMap& positions = ai->GetAiObjectContext()->GetValue<PositionMap&>("position")->Get();
-                    positions["stay"].Set(participant.ActivityX, participant.ActivityY, participant.ActivityZ,
-                        event.EventZone.MapId);
+                    uint32 guidLow = participant.Bot.GuidLow;
+                    if (bot->GetDistance2d(participant.ActivityX, participant.ActivityY) <= DuelHomeAreaRadius + 2.0f)
+                    {
+                        _idleReturnPoint.erase(guidLow);
+                        positions["stay"].Set(bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ(),
+                            event.EventZone.MapId);
+                    }
+                    else
+                    {
+                        auto point = _idleReturnPoint.find(guidLow);
+                        if (point == _idleReturnPoint.end())
+                        {
+                            float angle = frand(0.0f, 2.0f * float(M_PI));
+                            float radius = frand(0.0f, DuelHomeAreaRadius);
+                            float x = participant.ActivityX + std::cos(angle) * radius;
+                            float y = participant.ActivityY + std::sin(angle) * radius;
+                            float z = GroundZ(event.EventZone.MapId, x, y, participant.ActivityZ);
+                            point = _idleReturnPoint.emplace(guidLow, Position(x, y, z)).first;
+                        }
+                        positions["stay"].Set(point->second.GetPositionX(), point->second.GetPositionY(),
+                            point->second.GetPositionZ(), event.EventZone.MapId);
+                    }
                 }
 
                 // Rode in from a drop-off: get off at the spot.

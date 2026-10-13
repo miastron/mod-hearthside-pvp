@@ -146,6 +146,8 @@ namespace PvPLife
         {
             float X = 0.0f, Y = 0.0f;
             float Radius = 0.0f; // 0 = unbounded
+            float HomeX = 0.0f, HomeY = 0.0f;
+            float HomeRadius = 0.0f; // the bot's own staging spot; 0 = none
         };
         void UpdateFootwork();
         // What it did, for PvPLife.Footwork.Trace: an action, a spell name, or why it held.
@@ -261,7 +263,7 @@ namespace PvPLife
         uint32 _realPlayerCooldownSeconds = 900;
         uint32 _botChallengeCooldownSeconds = 180;
         uint32 _botDuelCooldownSeconds = 45;
-        uint32 _botDuelMaxLevelDifference = 5;
+        uint32 _botDuelMaxLevelDifference = 2;
         bool _footworkDuels = true;
         bool _footworkWorldPvp = true;
         bool _footworkTrace = false;
@@ -336,6 +338,8 @@ namespace PvPLife
         };
         std::unordered_map<uint32, PendingWalk> _pendingWalks;
         std::unordered_set<uint32> _dismountOnArrival;
+        // Where an idle duel bot that wandered off is walking back to, inside its home area.
+        std::unordered_map<uint32, Position> _idleReturnPoint;
         std::vector<DuelStep> _duelQueue;
         std::vector<EngagementStep> _engagementQueue;
         std::vector<ChatStep> _chatQueue;
