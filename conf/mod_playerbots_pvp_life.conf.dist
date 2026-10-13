@@ -388,6 +388,17 @@ PvPLife.Footwork.Duels = 1
 PvPLife.Footwork.WorldPvP = 1
 
 #
+#   PvPLife.Footwork.Battlegrounds
+#       Description: The same footwork for every bot (leased or not) fighting a player in a running
+#                    battleground, never arenas. Objectives win: never a flag carrier (WSG, EotS), never a
+#                    bot mod-playerbots is walking somewhere away from the fight, never mid-cast (which
+#                    covers capturing a flag or base), and each move stays within 12 yards of where the
+#                    bot stood. Off by default while it is being tested.
+#       Default:     0 (Disabled)
+#
+PvPLife.Footwork.Battlegrounds = 0
+
+#
 #   PvPLife.Footwork.IntervalMinMs / IntervalMaxMs
 #       Description: Random delay between one bot's footwork decisions, in milliseconds.
 #       Default:     1000, 2500

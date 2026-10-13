@@ -150,6 +150,10 @@ namespace PvPLife
             float HomeRadius = 0.0f; // the bot's own staging spot; 0 = none
         };
         void UpdateFootwork();
+        // Any of this realm's own bots fighting a player in a battleground, not only leased ones.
+        void UpdateBattlegroundFootwork(uint64 now);
+        // The per-bot interval, the state gates and the trace around Footwork.
+        void RunFootwork(Player* bot, Player* opponent, FootworkBound const& bound, char const* context, uint64 now);
         // What it did, for PvPLife.Footwork.Trace: an action, a spell name, or why it held.
         char const* Footwork(Player* bot, Player* opponent, FootworkBound const& bound);
         bool FootworkStep(Player* bot, float angle, float distance, Position const& from, bool jump,
@@ -266,6 +270,7 @@ namespace PvPLife
         uint32 _botDuelMaxLevelDifference = 2;
         bool _footworkDuels = true;
         bool _footworkWorldPvp = true;
+        bool _footworkBattlegrounds = false;
         bool _footworkTrace = false;
         uint32 _footworkIntervalMinMs = 1000;
         uint32 _footworkIntervalMaxMs = 2500;

@@ -13,6 +13,9 @@
 
 #include "AiFactory.h"
 #include "BattlefieldMgr.h"
+#include "Battleground.h"
+#include "BattlegroundEY.h"
+#include "BattlegroundWS.h"
 #include "CellImpl.h"
 #include "Chat.h"
 #include "Config.h"
@@ -381,6 +384,7 @@ namespace PvPLife
         _duelGuardIntervalMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.GuardIntervalMs", 1000), 250, 5000);
         _footworkDuels = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Duels", true);
         _footworkWorldPvp = sConfigMgr->GetOption<bool>("PvPLife.Footwork.WorldPvP", true);
+        _footworkBattlegrounds = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Battlegrounds", false);
         _footworkIntervalMinMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMinMs", 1000), 500, 30000);
         _footworkIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMaxMs", 2500), _footworkIntervalMinMs, 60000);
         _footworkJumpChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.JumpChance", 35));
@@ -1829,9 +1833,9 @@ namespace PvPLife
 
     void Manager::UpdateFootwork()
     {
-        if (!_footworkDuels && !_footworkWorldPvp)
+        if (!_footworkDuels && !_footworkWorldPvp && !_footworkBattlegrounds)
             return;
-        if (_footworkNextMs.size() > 1024)
+        if (_footworkNextMs.size() > 4096)
             _footworkNextMs.clear();
         uint64 now = NowMs();
         for (ActiveEvent const& event : _activeEvents)
@@ -1881,40 +1885,85 @@ namespace PvPLife
                 if (!opponent || !opponent->IsInWorld() || opponent->GetMap() != bot->GetMap())
                     continue;
 
-                uint64& next = _footworkNextMs[participant.Bot.GuidLow];
-                if (next > now)
-                    continue;
-                next = now + urand(_footworkIntervalMinMs, _footworkIntervalMaxMs);
-                // Never cut a cast short, and leave control effects and mounts alone.
-                char const* outcome = nullptr;
-                if (!bot->IsAlive() || !opponent->IsAlive())
-                    outcome = "skip:dead";
-                else if (bot->IsNonMeleeSpellCast(false) || bot->HasUnitState(UNIT_STATE_CASTING))
-                    outcome = "skip:casting";
-                else if (bot->IsInFlight())
-                    outcome = "skip:flight";
-                else if (bot->IsMounted())
-                {
-                    // Fighting a player while mounted: get off (the duel-start dismount misses a bot
-                    // remounted by its own AI, and world PvP has no start to hook).
-                    bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
-                    outcome = "dismount";
-                }
-                else if (bot->IsFalling() || bot->IsInWater() || bot->HasUnitState(UNIT_STATE_JUMPING | UNIT_STATE_CHARGING))
-                    outcome = "skip:airborne";
-                else if (bot->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING))
-                    outcome = "skip:controlled";
-                else
-                    outcome = Footwork(bot, opponent, bound);
-                if (_footworkTrace)
-                    AuditLog("FOOTWORK", "bot=" + bot->GetName() + " class=" + std::to_string(bot->getClass()) +
-                        " tab=" + std::to_string(AiFactory::GetPlayerSpecTab(bot)) +
-                        " dist=" + std::to_string(int(bot->GetExactDist2d(opponent))) +
-                        " moving=" + std::to_string(bot->isMoving() ? 1 : 0) +
-                        " mm=" + std::to_string(int(bot->GetMotionMaster()->GetCurrentMovementGeneratorType())) +
-                        " " + (duelEvent ? "duel" : "wpvp") + " " + outcome);
+                RunFootwork(bot, opponent, bound, duelEvent ? "duel" : "wpvp", now);
             }
         }
+        if (_footworkBattlegrounds)
+            UpdateBattlegroundFootwork(now);
+    }
+
+    void Manager::UpdateBattlegroundFootwork(uint64 now)
+    {
+        for (auto const& [guid, bot] : ObjectAccessor::GetPlayers())
+        {
+            if (!bot || !bot->IsInWorld() || !bot->InBattleground() || bot->InArena() || !bot->IsInCombat())
+                continue;
+            Battleground* bg = bot->GetBattleground();
+            if (!bg || bg->GetStatus() != STATUS_IN_PROGRESS)
+                continue;
+            // Only bots running on their own AI. Unlike the leased events, a real player in the
+            // same raid does not count: every battleground raid has one.
+            PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+            if (!ai || ::IsRealPlayer(bot) || ::IsSelfBot(bot) || ai->HasGameClientMaster())
+                continue;
+            // The objective always wins: never touch a flag carrier, and never a bot on its way
+            // somewhere (mod-playerbots' battleground tactics walking it to a base, a flag, an escort).
+            if (bot->HasAura(BG_WS_SPELL_WARSONG_FLAG) || bot->HasAura(BG_WS_SPELL_SILVERWING_FLAG) ||
+                bot->HasAura(BG_EY_NETHERSTORM_FLAG_SPELL))
+                continue;
+            Unit* victim = bot->GetVictim();
+            Player* opponent = victim ? victim->ToPlayer() : nullptr;
+            if (!opponent || !opponent->IsInWorld() || opponent->GetMap() != bot->GetMap() ||
+                bot->GetExactDist2d(opponent) > 30.0f)
+                continue;
+            float dx, dy, dz;
+            if (bot->isMoving() && bot->GetMotionMaster()->GetCurrentMovementGeneratorType() == POINT_MOTION_TYPE &&
+                bot->GetMotionMaster()->GetDestination(dx, dy, dz) &&
+                opponent->GetExactDist2d(dx, dy) > 15.0f && bot->GetExactDist2d(dx, dy) > 15.0f)
+                continue;
+            // No arena of its own to stay in: keep each move close to where the fight is.
+            FootworkBound bound;
+            bound.X = bot->GetPositionX();
+            bound.Y = bot->GetPositionY();
+            bound.Radius = 12.0f;
+            RunFootwork(bot, opponent, bound, "bg", now);
+        }
+    }
+
+    void Manager::RunFootwork(Player* bot, Player* opponent, FootworkBound const& bound, char const* context, uint64 now)
+    {
+        uint64& next = _footworkNextMs[bot->GetGUID().GetCounter()];
+        if (next > now)
+            return;
+        next = now + urand(_footworkIntervalMinMs, _footworkIntervalMaxMs);
+        // Never cut a cast short, and leave control effects and mounts alone.
+        char const* outcome = nullptr;
+        if (!bot->IsAlive() || !opponent->IsAlive())
+            outcome = "skip:dead";
+        else if (bot->IsNonMeleeSpellCast(false) || bot->HasUnitState(UNIT_STATE_CASTING))
+            outcome = "skip:casting";
+        else if (bot->IsInFlight())
+            outcome = "skip:flight";
+        else if (bot->IsMounted())
+        {
+            // Fighting a player while mounted: get off (the duel-start dismount misses a bot
+            // remounted by its own AI, and world PvP has no start to hook).
+            bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+            outcome = "dismount";
+        }
+        else if (bot->IsFalling() || bot->IsInWater() || bot->HasUnitState(UNIT_STATE_JUMPING | UNIT_STATE_CHARGING))
+            outcome = "skip:airborne";
+        else if (bot->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING))
+            outcome = "skip:controlled";
+        else
+            outcome = Footwork(bot, opponent, bound);
+        if (_footworkTrace)
+            AuditLog("FOOTWORK", "bot=" + bot->GetName() + " class=" + std::to_string(bot->getClass()) +
+                " tab=" + std::to_string(AiFactory::GetPlayerSpecTab(bot)) +
+                " dist=" + std::to_string(int(bot->GetExactDist2d(opponent))) +
+                " moving=" + std::to_string(bot->isMoving() ? 1 : 0) +
+                " mm=" + std::to_string(int(bot->GetMotionMaster()->GetCurrentMovementGeneratorType())) +
+                " " + context + " " + outcome);
     }
 
     namespace
