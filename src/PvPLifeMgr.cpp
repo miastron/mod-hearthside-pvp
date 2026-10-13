@@ -1517,7 +1517,10 @@ namespace PvPLife
                 ai->ChangeStrategy(combatStrats, BOT_STATE_COMBAT);
                 ai->ChangeStrategy(nonCombatStrats, BOT_STATE_NON_COMBAT);
                 if (duelMode)
-                    ai->ChangeStrategy("+stay,-follow,-passive,-grind", BOT_STATE_NON_COMBAT);
+                    // -mount: mod-playerbots remounts an idle bot, and the 3-second duel countdown is
+                    // idle, so a duelist dismounted for the challenge got back on just to be pulled off
+                    // again when the duel began (realm 2026-10-13).
+                    ai->ChangeStrategy("+stay,-follow,-passive,-grind,-mount", BOT_STATE_NON_COMBAT);
             }
         }
     }
@@ -1775,6 +1778,16 @@ namespace PvPLife
         return false;
     }
 
+    bool Manager::RealPlayerWatching(Player* bot) const
+    {
+        constexpr float WatchRange = 150.0f;
+        for (auto const& ref : bot->GetMap()->GetPlayers())
+            if (Player* p = ref.GetSource(); p && p != bot && p->IsInWorld() && IsHumanPlayer(p) &&
+                p->GetExactDist2d(bot) <= WatchRange)
+                return true;
+        return false;
+    }
+
     bool Manager::IsLeasedParticipant(uint32 guidLow) const
     {
         for (ActiveEvent const& event : _activeEvents)
@@ -1818,7 +1831,14 @@ namespace PvPLife
             {
                 walk.MountTried = true;
                 if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
+                {
+                    bool hadMount = ai->HasStrategy("mount", BOT_STATE_NON_COMBAT);
+                    if (!hadMount)
+                        ai->ChangeStrategy("+mount", BOT_STATE_NON_COMBAT);
                     ai->DoSpecificAction("check mount state", Event(), true);
+                    if (!hadMount)
+                        ai->ChangeStrategy("-mount", BOT_STATE_NON_COMBAT);
+                }
                 if (bot->IsNonMeleeSpellCast(false))
                 {
                     walk.DueMs = now + 1800; // let the mount cast finish before moving
@@ -1871,10 +1891,20 @@ namespace PvPLife
                     bound.Radius = flag ? 38.0f : float(_duelLeashRadius) - 2.0f;
                     // The flag spawns between the duelists wherever they stand, so a 38-yard
                     // allowance around it lets every duel start a little farther off than the
-                    // last (realm 2026-10-12: pairs drifting onto the road). Anchor to the bot's
-                    // own staging spot as well.
+                    // last (realm 2026-10-12: pairs drifting onto the road). Anchor to the pair's
+                    // staging spots as well: the midpoint of both duelists' own spots. Not each
+                    // bot's own spot -- re-paired bots come from different lanes, and two home
+                    // pulls 36 yards apart dragged a warrior and a hunter apart for a whole duel
+                    // (realm 2026-10-13, Gracie and Jarenn).
                     bound.HomeX = participant.ActivityX;
                     bound.HomeY = participant.ActivityY;
+                    for (Participant const& other : event.Members)
+                        if (other.Bot.GuidLow == opponent->GetGUID().GetCounter())
+                        {
+                            bound.HomeX = (participant.ActivityX + other.ActivityX) * 0.5f;
+                            bound.HomeY = (participant.ActivityY + other.ActivityY) * 0.5f;
+                            break;
+                        }
                     bound.HomeRadius = DuelFootworkHomeRadius;
                 }
                 else
@@ -2030,6 +2060,11 @@ namespace PvPLife
             float sweep = Position::NormalizeOrientation(angle - startAngle);
             if (sweep > float(M_PI))
                 sweep -= 2.0f * float(M_PI);
+            if (startRadius < 1.0f)
+            {
+                startAngle = angle;
+                sweep = 0.0f;
+            }
             uint32 points = std::clamp<uint32>(uint32(step / 1.5f), 2, 8);
             Movement::PointsArray path;
             path.push_back(G3D::Vector3(bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ()));
@@ -2121,12 +2156,22 @@ namespace PvPLife
         Position const& them = opponent->GetPosition();
 
         // Back inside the duel area before anything else. A caster walks it, a melee may jump it.
-        bool offHome = bound.HomeRadius > 0.0f && bot->GetExactDist2d(bound.HomeX, bound.HomeY) > bound.HomeRadius - 3.0f;
-        if (offHome || (bound.Radius > 0.0f && bot->GetExactDist2d(bound.X, bound.Y) > bound.Radius - 4.0f))
+        // The pull home is for footwork that wandered, never a reason to stop fighting: a bot already
+        // within reach of its opponent, or one whose opponent stands nearer home than it does (so the
+        // chase itself heads home), is left to fight (realm 2026-10-13: a warrior spent a whole duel
+        // walking home while the hunter's pet chewed on it).
+        bool chaseHeadsHome = bound.HomeRadius > 0.0f &&
+            opponent->GetExactDist2d(bound.HomeX, bound.HomeY) + 5.0f < bot->GetExactDist2d(bound.HomeX, bound.HomeY);
+        bool inReach = bot->IsWithinMeleeRange(opponent);
+        bool offHome = bound.HomeRadius > 0.0f && !inReach && !chaseHeadsHome &&
+            bot->GetExactDist2d(bound.HomeX, bound.HomeY) > bound.HomeRadius - 3.0f;
+        bool offEdge = bound.Radius > 0.0f && bot->GetExactDist2d(bound.X, bound.Y) > bound.Radius - 4.0f &&
+            opponent->GetExactDist2d(bound.X, bound.Y) + 5.0f >= bot->GetExactDist2d(bound.X, bound.Y);
+        if (offHome || offEdge)
         {
             Position centre = offHome ? Position(bound.HomeX, bound.HomeY, bot->GetPositionZ())
                                       : Position(bound.X, bound.Y, bot->GetPositionZ());
-            return FootworkStep(bot, opponent, bot->GetAngle(&centre), frand(6.0f, 9.0f), bot->GetPosition(), jump && !profile.HardCaster, FootworkBound())
+            return FootworkStep(bot, opponent, bot->GetAngle(&centre) + frand(-0.3f, 0.3f), frand(6.0f, 9.0f), bot->GetPosition(), jump && !profile.HardCaster, FootworkBound())
                 ? "edge:back-in" : "edge:blocked";
         }
 
@@ -2351,7 +2396,9 @@ namespace PvPLife
                 bool secondReady = deploy(*b, true, index);
                 if (!firstReady || !secondReady)
                     continue;
-                uint32 delay = _arrivalStaggerMax + index + _duelPairDelayMax;
+                // Room for the walk in from a drop-off, then each pair on its own clock: a shared
+                // formula started the whole first round at once (realm 2026-10-13).
+                uint32 delay = _arrivalStaggerMax + 20 + urand(5, 40);
                 if (ScheduleDuel(event.EventId, pair.PairId, a->Token, b->Token,
                     a->Bot.GuidLow, b->Bot.GuidLow, a->Bot.Name, b->Bot.Name, delay))
                     pair.Deployed = true;
@@ -3023,7 +3070,23 @@ namespace PvPLife
                 if (sRandomPlayerbotMgr.IsRandomBot(player))
                     sRandomPlayerbotMgr.ScheduleTeleport(part.Bot.GuidLow);
                 if (it->ReturnHome && player->IsAlive() && !player->IsInCombat())
-                    player->TeleportTo(part.OriginalMap, part.OriginalX, part.OriginalY, part.OriginalZ, part.OriginalO);
+                {
+                    if (RealPlayerWatching(player))
+                    {
+                        // Seen: walk off and carry on as an ordinary bot here, and hold mod-playerbots'
+                        // own random teleport off for a while too.
+                        if (sRandomPlayerbotMgr.IsRandomBot(player))
+                            sRandomPlayerbotMgr.ScheduleTeleport(part.Bot.GuidLow, urand(1200, 2400));
+                        float angle = frand(0.0f, 2.0f * float(M_PI));
+                        float x = player->GetPositionX() + std::cos(angle) * frand(40.0f, 80.0f);
+                        float y = player->GetPositionY() + std::sin(angle) * frand(40.0f, 80.0f);
+                        float z = player->GetPositionZ();
+                        if (player->GetMap()->CanReachPositionAndGetValidCoords(player, x, y, z))
+                            player->GetMotionMaster()->MovePoint(0, x, y, z);
+                    }
+                    else
+                        player->TeleportTo(part.OriginalMap, part.OriginalX, part.OriginalY, part.OriginalZ, part.OriginalO);
+                }
                 ++_changesThisTick;
                 it->Phase = ReleasePhase::Released;
                 PlayerbotsLife::ReleaseLeaseExact(part.Token);
@@ -3040,7 +3103,17 @@ namespace PvPLife
             if (event.Closing)
                 continue;
             if (event.EndsAt <= now)
+            {
+                // Let the duels under way finish (up to two minutes) rather than cut them off.
+                if (event.EventZone.Type == ActivityType::Duel && now < event.EndsAt + 120 &&
+                    std::any_of(event.Members.begin(), event.Members.end(), [this](Participant const& part)
+                    {
+                        Player* player = FindPlayer(part.Bot.GuidLow);
+                        return player && player->duel && player->duel->State == DUEL_STATE_IN_PROGRESS;
+                    }))
+                    continue;
                 EndEvent(event, "timer");
+            }
             else if (event.FullyPrepared && event.EventZone.Type == ActivityType::Duel)
             {
                 // A bot mid-teleport is briefly out of the world but still taking part.
@@ -3526,7 +3599,8 @@ namespace PvPLife
 
         for (ActiveEvent const& event : _activeEvents)
         {
-            if (event.Closing || !event.FullyPrepared || event.EventZone.Type != ActivityType::Duel)
+            if (event.Closing || !event.FullyPrepared || event.EventZone.Type != ActivityType::Duel ||
+                event.EndsAt <= now)
                 continue;
 
             std::vector<uint32> available;

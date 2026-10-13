@@ -182,6 +182,8 @@ namespace PvPLife
         bool FindDropOff(Player* bot, uint32 mapId, float x, float y, float z, Position& dropOff) const;
         void ProcessPendingWalks();
         bool IsLeasedParticipant(uint32 guidLow) const;
+        // A real player within sight of this bot: ending an event then walks it off instead of a teleport.
+        bool RealPlayerWatching(Player* bot) const;
         void EngageTarget(Player* bot, Player* target);
         float Jitter() const;
         uint32 GetLiveWorldBotCount() const;
