@@ -184,6 +184,8 @@ namespace PvPLife
         bool IsLeasedParticipant(uint32 guidLow) const;
         // A real player within sight of this bot: ending an event then walks it off instead of a teleport.
         bool RealPlayerWatching(Player* bot) const;
+        // mod-playerbots' BotActiveAlone verdict: new duels, engagements and footwork wait for it.
+        bool BotActive(Player* bot) const;
         void EngageTarget(Player* bot, Player* target);
         float Jitter() const;
         uint32 GetLiveWorldBotCount() const;

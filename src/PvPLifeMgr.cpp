@@ -1778,6 +1778,15 @@ namespace PvPLife
         return false;
     }
 
+    bool Manager::BotActive(Player* bot) const
+    {
+        // mod-playerbots' own answer (Playerbots.BotActiveAlone and its force rules: a real player in
+        // range or in the zone, combat, a battleground, the rotating share, SmartScale). An event
+        // keeps its bots either way; an inactive one just stands where it is until it wakes.
+        PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+        return ai && ai->AllowActivity();
+    }
+
     bool Manager::RealPlayerWatching(Player* bot) const
     {
         constexpr float WatchRange = 150.0f;
@@ -1966,6 +1975,8 @@ namespace PvPLife
 
     void Manager::RunFootwork(Player* bot, Player* opponent, FootworkBound const& bound, char const* context, uint64 now)
     {
+        if (!BotActive(bot))
+            return;
         uint64& next = _footworkNextMs[bot->GetGUID().GetCounter()];
         if (next > now)
             return;
@@ -3200,6 +3211,14 @@ namespace PvPLife
             if (!bot || !target || !bot->IsAlive() || !target->IsAlive())
                 continue;
 
+            if (!BotActive(bot))
+            {
+                EngagementStep wait = step;
+                wait.ExecuteAt = now + _engageRetrySeconds;
+                keep.push_back(wait);
+                continue;
+            }
+
             EngageTarget(bot, target);
 
             if (!bot->IsInCombat() && step.RetryCount < step.MaxRetries)
@@ -3248,6 +3267,13 @@ namespace PvPLife
             Player* target = FindPlayer(step.TargetGuidLow);
             if (!challenger || !target || challenger == target || !challenger->GetSession() || !target->GetSession())
                 continue;
+            if (!BotActive(challenger) || (!step.TargetIsRealPlayer && !BotActive(target)))
+            {
+                DuelStep wait = step;
+                wait.ExecuteAt = now + 5;
+                keep.push_back(wait);
+                continue;
+            }
             // Same account test IsSafeBot used when the bots were admitted.
             auto borrowable = [this](Player* bot)
             {
@@ -3631,6 +3657,8 @@ namespace PvPLife
                     continue;
                 }
 
+                if (!BotActive(bot))
+                    continue;
                 auto duelCd = _botDuelCooldown.find(guidLow);
                 if (duelCd != _botDuelCooldown.end() && duelCd->second > now)
                     continue;
