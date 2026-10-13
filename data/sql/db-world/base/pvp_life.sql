@@ -60,9 +60,12 @@ INSERT IGNORE INTO `pvp_life_zone`
  `rally_x`,`rally_y`,`rally_z`,`rally_o`,`target_x`,`target_y`,`target_z`,`target_o`,
  `attackers_min`,`attackers_max`,`defenders_min`,`defenders_max`,`duration_min`,`duration_max`,`weight`,`cooldown_seconds`,`last_start`,`challenge_players`,`bot_chat`)
 VALUES
--- Duel zones: intentionally level 1-80. Both modules run capital gate duels concurrently.
+-- Duel zones: intentionally level 1-80. PvP Life runs all duels; City Life only places spectators at
+-- these three spots. Goldshire is a busy town square, so it holds at most two pairs and does not
+-- challenge real players (many there are new characters).
 ('StormwindDuel',1,1,0,0,1,80,0, -9122.49,350.862,93.7893,4.19046, -9122.49,350.862,93.7893,4.19046, 2,4,2,4,20,40,220,30,0,1,0),
 ('OrgrimmarDuel',1,1,1,1,1,80,1, 1282.04,-4395.88,26.3002,3.63561, 1282.04,-4395.88,26.3002,3.63561, 2,4,2,4,20,40,220,30,0,1,0),
+('GoldshireDuel',1,1,0,0,1,80,0, -9456.63,80.21,56.50,1.25, -9456.63,80.21,56.50,1.25, 1,2,1,2,20,40,120,60,0,0,0),
 
 -- Classic world-PvP hotspots (PvP Life baseline)
 ('STV_Nesingwary',1,0,1,0,25,50,0, -11490.5,-302.536,35.7362,3.57, -11490.5,-302.536,35.7362,3.57, 2,5,2,5,12,25,120,600,0,0,0),

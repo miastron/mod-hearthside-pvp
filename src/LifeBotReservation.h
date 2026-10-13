@@ -20,7 +20,7 @@
 
 namespace PlayerbotsLife
 {
-    constexpr std::uint32_t LIFE_BOT_RESERVATION_PROTOCOL_VERSION = 2026101201;
+    constexpr std::uint32_t LIFE_BOT_RESERVATION_PROTOCOL_VERSION = 2026101301;
 
     enum class ReservationOwner : std::uint8_t
     {
@@ -128,7 +128,6 @@ namespace PlayerbotsLife
         ReservationOwner CurrentPriorityOwner{ReservationOwner::CityLife};
         std::vector<AdmissionRequest> PendingAdmissionRequests;
         std::vector<AdmissionGrant> RecentAdmissionGrants;
-        std::atomic<bool> TelemetryBridgeRegistered{false};
         std::atomic<std::uint32_t> ProtocolVersion{0};
     };
 
