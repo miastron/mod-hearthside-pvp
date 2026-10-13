@@ -1509,6 +1509,10 @@ namespace PvPLife
             {
                 std::string combatStrats = _pvpCombatStrategies;
                 std::string nonCombatStrats = duelMode ? _duelNonCombatStrategies : _pvpNonCombatStrategies;
+                // Whichever wandering strategy mod-playerbots gave the bot (new rpg, or rpg when
+                // AutoDoQuests is on and the new one is off) walks it out of the event, whatever the
+                // configured sets say.
+                nonCombatStrats += ",-new rpg,-rpg,-travel";
                 if (!_botChatEnable || _botChatYellChance == 0)
                 {
                     combatStrats += ",-chat,-emote";

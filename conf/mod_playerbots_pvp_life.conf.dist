@@ -283,9 +283,9 @@ PvPLife.Combat.EngageMaxRetries = 12
 #
 #   PvPLife.Strategies.Combat / NonCombat / DuelNonCombat
 #       Description: Strategy expressions assigned to bots during combat, roaming, and duels.
-#                    Keep "-new rpg" in both non-combat sets: with Playerbots.EnableNewRpgStrategy on,
-#                    that strategy walks bots off to the nearest innkeeper/flight master, which the
-#                    event leash then teleports back, over and over.
+#                    "-new rpg,-rpg,-travel" are always added to the non-combat set, whatever is
+#                    configured here: those strategies walk bots off to the nearest innkeeper, flight
+#                    master or quest, which the event leash then pulls back, over and over.
 #
 PvPLife.Strategies.Combat = "+pvp,+boost,+dps debuff,-passive,-stay"
 PvPLife.Strategies.NonCombat = "+pvp,+boost,-passive,-stay,-new rpg"
