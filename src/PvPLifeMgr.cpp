@@ -1632,6 +1632,12 @@ namespace PvPLife
     {
         if (!player || player->IsBeingTeleported())
             return;
+        // A failed height probe (INVALID_HEIGHT) or a bad zone row would teleport the bot into the void.
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || !std::isfinite(o) || z <= INVALID_HEIGHT)
+        {
+            AuditLog("MOVE", "player=" + player->GetName() + " rejected invalid destination map=" + std::to_string(mapId));
+            return;
+        }
 
         bool sameMap = player->GetMapId() == mapId;
         if (_dropOffArrival && player->IsAlive() && (teleport || !sameMap || !_useMovePoint))
