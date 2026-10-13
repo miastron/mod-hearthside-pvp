@@ -148,7 +148,8 @@ namespace PvPLife
             float Radius = 0.0f; // 0 = unbounded
         };
         void UpdateFootwork();
-        void Footwork(Player* bot, Player* opponent, FootworkBound const& bound);
+        // What it did, for PvPLife.Footwork.Trace: an action, a spell name, or why it held.
+        char const* Footwork(Player* bot, Player* opponent, FootworkBound const& bound);
         bool FootworkStep(Player* bot, float angle, float distance, Position const& from, bool jump,
             FootworkBound const& bound) const;
         // Keeps mod-playerbots' level brackets from re-leveling a bot while it is leased.
@@ -263,6 +264,7 @@ namespace PvPLife
         uint32 _botDuelMaxLevelDifference = 5;
         bool _footworkDuels = true;
         bool _footworkWorldPvp = true;
+        bool _footworkTrace = false;
         uint32 _footworkIntervalMinMs = 1500;
         uint32 _footworkIntervalMaxMs = 4000;
         uint32 _footworkJumpChance = 35;

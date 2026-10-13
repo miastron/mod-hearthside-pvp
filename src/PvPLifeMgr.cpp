@@ -384,6 +384,7 @@ namespace PvPLife
         _footworkIntervalMinMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMinMs", 1500), 500, 30000);
         _footworkIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMaxMs", 4000), _footworkIntervalMinMs, 60000);
         _footworkJumpChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.JumpChance", 35));
+        _footworkTrace = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Trace", false);
         _challengeRealPlayers = sConfigMgr->GetOption<bool>("PvPLife.Duel.ChallengeRealPlayers", true);
         _realPlayerChallengeChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Duel.PlayerChallengeChance", 25));
         _realPlayerScanRadius = std::min<uint32>(1000, sConfigMgr->GetOption<uint32>("PvPLife.Duel.PlayerScanRadius", 55));
@@ -1874,12 +1875,26 @@ namespace PvPLife
                     continue;
                 next = now + urand(_footworkIntervalMinMs, _footworkIntervalMaxMs);
                 // Never cut a cast short, and leave control effects and mounts alone.
-                if (!bot->IsAlive() || !opponent->IsAlive() || bot->IsNonMeleeSpellCast(false) || bot->IsMounted() ||
-                    bot->IsFalling() || bot->IsInWater() || bot->IsInFlight() ||
-                    bot->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING |
-                        UNIT_STATE_CASTING | UNIT_STATE_JUMPING | UNIT_STATE_CHARGING))
-                    continue;
-                Footwork(bot, opponent, bound);
+                char const* outcome = nullptr;
+                if (!bot->IsAlive() || !opponent->IsAlive())
+                    outcome = "skip:dead";
+                else if (bot->IsNonMeleeSpellCast(false) || bot->HasUnitState(UNIT_STATE_CASTING))
+                    outcome = "skip:casting";
+                else if (bot->IsMounted() || bot->IsInFlight())
+                    outcome = "skip:mounted";
+                else if (bot->IsFalling() || bot->IsInWater() || bot->HasUnitState(UNIT_STATE_JUMPING | UNIT_STATE_CHARGING))
+                    outcome = "skip:airborne";
+                else if (bot->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING))
+                    outcome = "skip:controlled";
+                else
+                    outcome = Footwork(bot, opponent, bound);
+                if (_footworkTrace)
+                    AuditLog("FOOTWORK", "bot=" + bot->GetName() + " class=" + std::to_string(bot->getClass()) +
+                        " tab=" + std::to_string(AiFactory::GetPlayerSpecTab(bot)) +
+                        " dist=" + std::to_string(int(bot->GetExactDist2d(opponent))) +
+                        " moving=" + std::to_string(bot->isMoving() ? 1 : 0) +
+                        " mm=" + std::to_string(int(bot->GetMotionMaster()->GetCurrentMovementGeneratorType())) +
+                        " " + (duelEvent ? "duel" : "wpvp") + " " + outcome);
             }
         }
     }
@@ -1929,11 +1944,11 @@ namespace PvPLife
         return true;
     }
 
-    void Manager::Footwork(Player* bot, Player* opponent, FootworkBound const& bound)
+    char const* Manager::Footwork(Player* bot, Player* opponent, FootworkBound const& bound)
     {
         PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
         if (!ai)
-            return;
+            return "no-ai";
         FootworkProfile const& profile = FootworkProfileFor(bot->getClass(), AiFactory::GetPlayerSpecTab(bot));
         float distance = bot->GetExactDist2d(opponent);
         float away = opponent->GetAngle(bot); // from the opponent toward this bot
@@ -1946,8 +1961,8 @@ namespace PvPLife
         if (bound.Radius > 0.0f && bot->GetExactDist2d(bound.X, bound.Y) > bound.Radius - 4.0f)
         {
             Position centre(bound.X, bound.Y, bot->GetPositionZ());
-            FootworkStep(bot, bot->GetAngle(&centre), frand(6.0f, 9.0f), bot->GetPosition(), jump && !profile.HardCaster, FootworkBound());
-            return;
+            return FootworkStep(bot, bot->GetAngle(&centre), frand(6.0f, 9.0f), bot->GetPosition(), jump && !profile.HardCaster, FootworkBound())
+                ? "edge:back-in" : "edge:blocked";
         }
 
         if (profile.MinRange > 0.0f)
@@ -1960,11 +1975,11 @@ namespace PvPLife
                 // trades casting for a chase neither side wins.
                 if (controlled)
                 {
-                    FootworkStep(bot, away + frand(-0.4f, 0.4f), std::min(mid, distance + 9.0f), them, jump, bound);
-                    return;
+                    return FootworkStep(bot, away + frand(-0.4f, 0.4f), std::min(mid, distance + 9.0f), them, jump, bound)
+                        ? "close:back-off" : "close:back-off-blocked";
                 }
-                if (CastFirst(ai, bot, opponent, profile.Controls))
-                    return;
+                if (char const* cast = CastFirst(ai, bot, opponent, profile.Controls))
+                    return cast;
                 for (FootworkSpell const& escape : profile.Escapes)
                 {
                     if (!escape.Name)
@@ -1977,37 +1992,44 @@ namespace PvPLife
                     else
                         bot->SetFacingTo(away);
                     if (ai->CastSpell(escape.Name, bot))
-                        return;
+                        return escape.Name;
                 }
                 if (!profile.HardCaster)
-                    FootworkStep(bot, away + side * frand(0.8f, 1.4f), distance + frand(3.0f, 5.0f), them, jump, bound);
-                return; // a caster with nothing up stands and casts
+                    return FootworkStep(bot, away + side * frand(0.8f, 1.4f), distance + frand(3.0f, 5.0f), them, jump, bound)
+                        ? "close:sidestep" : "close:sidestep-blocked";
+                return "close:stand"; // a caster with nothing up stands and casts
             }
             // In its band: a spec that fights with instants keeps moving, a caster keeps casting.
-            if (distance <= profile.MaxRange && !profile.HardCaster)
-                FootworkStep(bot, away + side * frand(4.0f, 7.0f) / distance,
-                    std::clamp(distance + frand(-2.0f, 2.0f), profile.MinRange, profile.MaxRange), them, jump, bound);
-            return; // out of range: the combat AI closes in
+            if (distance > profile.MaxRange)
+                return "far:ai"; // out of range: the combat AI closes in
+            if (profile.HardCaster)
+                return "band:cast";
+            return FootworkStep(bot, away + side * frand(4.0f, 7.0f) / distance,
+                std::clamp(distance + frand(-2.0f, 2.0f), profile.MinRange, profile.MaxRange), them, jump, bound)
+                ? "band:strafe" : "band:strafe-blocked";
         }
 
         // Melee.
         if (distance > 8.0f && distance <= 25.0f)
         {
-            if (CastFirst(ai, bot, opponent, profile.Closers))
-                return;
-            if (jump && bot->isMoving())
-                FootworkStep(bot, away, std::max(distance - frand(5.0f, 7.0f), 2.0f), them, true, bound); // leap while closing
-            return;
+            if (char const* cast = CastFirst(ai, bot, opponent, profile.Closers))
+                return cast;
+            if (!jump || !bot->isMoving())
+                return "gap:ai-chase";
+            return FootworkStep(bot, away, std::max(distance - frand(5.0f, 7.0f), 2.0f), them, true, bound) // leap while closing
+                ? "gap:leap" : "gap:leap-blocked";
         }
         if (distance > 7.0f)
-            return; // the combat AI's own chase covers it
+            return "far:ai"; // the combat AI's own chase covers it
         if (profile.WantsBehind && opponent->HasInArc(float(M_PI), bot))
         {
-            FootworkStep(bot, opponent->GetOrientation() + float(M_PI) + frand(-0.5f, 0.5f), frand(1.5f, 2.5f), them, jump, bound);
-            return;
+            return FootworkStep(bot, opponent->GetOrientation() + float(M_PI) + frand(-0.5f, 0.5f), frand(1.5f, 2.5f), them, jump, bound)
+                ? "melee:behind" : "melee:behind-blocked";
         }
-        if (urand(1, 100) <= 40)
-            FootworkStep(bot, away + side * frand(0.6f, 1.3f), frand(1.5f, 3.0f), them, jump, bound); // circle
+        if (urand(1, 100) > 40)
+            return "melee:hold";
+        return FootworkStep(bot, away + side * frand(0.6f, 1.3f), frand(1.5f, 3.0f), them, jump, bound) // circle
+            ? "melee:circle" : "melee:circle-blocked";
     }
 
     void Manager::KeepLeasedLevelsFixed()

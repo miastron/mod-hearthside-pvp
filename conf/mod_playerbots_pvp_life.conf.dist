@@ -403,6 +403,14 @@ PvPLife.Footwork.IntervalMaxMs = 4000
 PvPLife.Footwork.JumpChance = 35
 
 #
+#   PvPLife.Footwork.Trace
+#       Description: Write every footwork decision (the move, the spell cast, or why the bot held still) to
+#                    the audit log as FOOTWORK lines. For tuning; noisy.
+#       Default:     0 (Disabled)
+#
+PvPLife.Footwork.Trace = 0
+
+#
 #   PvPLife.Duel.ChallengeRealPlayers
 #       Description: Allow bots in duel zones to challenge nearby real players of their own faction.
 #                    Never GMs, and never a player who is dead, mounted, on a vehicle or taxi, AFK, DND,
