@@ -205,6 +205,9 @@ namespace PvPLife
         bool TryStartAntic(Player* bot, uint32 guidLow, LifeMotion::Antic kind = LifeMotion::Antic::None);
         void StopAntic(uint32 guidLow);
         bool AnticRunning(uint32 guidLow) const;
+        // Cast in a mod-hearthside-chat conversation (LifeActivity): not picked for a duel or a
+        // challenge, given an antic or a fidget, or released after lingering until the scene ends.
+        static bool Talking(Player const* bot) { return bot && LifeActivity::Busy(bot->GetGUID().GetRawValue()); }
         // Healer duelists who now and then heal the duelists of a duel that just finished in front of
         // them (LifeMedic.h, PvPLife.DuelMedics.*). Every ~100 ms from Update.
         void UpdateDuelMedics();

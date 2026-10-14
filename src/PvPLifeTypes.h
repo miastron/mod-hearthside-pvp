@@ -10,6 +10,7 @@
 #include "Define.h"
 #include "../../mod-hearthside-life/src/LifeBotReservation.h"
 #include "../../mod-hearthside-life/src/LifeBots.h"
+#include "../../mod-hearthside-life/src/LifeActivity.h"
 #include <string>
 #include <vector>
 

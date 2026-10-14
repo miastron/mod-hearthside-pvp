@@ -92,10 +92,14 @@ world thread.
 - **Bot detection:** this core has no `WorldSession::IsBot()`. Use `PvPLife::IsBotSession(player)`
   (account-based), not `IsRealPlayer()` alone: mod-playerbots attaches its AI after
   `OnPlayerLogin`, so a logging-in bot otherwise reads as human.
-- **Archetype filter:** if `hs_archetype.h` from `../mod-hearthside-chat` is on the include path,
-  Life's `LifeBots.h` defines `LIFEBOTS_HAS_ARCHETYPES` and `PvPLife.Bots.Archetypes` restricts which
-  bots may be borrowed (`Manager::FitsArchetype`). Without that module every bot fits; keep the code
-  compiling both ways.
+- **Archetype filter:** `PvPLife.Bots.Archetypes` restricts which bots may be borrowed
+  (`Manager::FitsArchetype`) using `../mod-hearthside-chat`'s personalities, asked through Life's
+  `LifeArchetypes` (Chat registers the provider). PvP never includes Chat's headers. Without a
+  provider (Chat not installed, or `HearthsideChat.Enable`/`HearthsideChat.Life.Enable` off) every bot
+  fits.
+- **Busy marks:** Chat marks the bots it casts in a /say scene (`LifeActivity`). `Manager::Talking`
+  keeps such a bot out of duel and real-player-challenge picks, antics and fidgets
+  (`MaintainDuelParticipants`) and the linger release (`DuelIdle`) until the scene ends.
 - Bots are borrowed as-is (no level, talent or gear changes), GMs are never challenged or yelled at,
   and all chatter and announcements default to off in config. Preserve these invariants.
 

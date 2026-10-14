@@ -3282,7 +3282,7 @@ namespace PvPLife
         if (!bot || !bot->IsInWorld())
             return true; // gone already: the release cleans up
         if (bot->duel || bot->IsInCombat() || bot->IsBeingTeleported() || AnticRunning(guidLow) ||
-            _pendingWalks.count(guidLow))
+            _pendingWalks.count(guidLow) || Talking(bot))
             return false;
         return std::none_of(_duelQueue.begin(), _duelQueue.end(), [guidLow](DuelStep const& step)
             { return step.ChallengerGuidLow == guidLow || step.TargetGuidLow == guidLow; });
@@ -3936,8 +3936,8 @@ namespace PvPLife
 
                 if (!BotActive(bot))
                     continue;
-                // Mid-antic: let it finish first (a duel would cut it off a few seconds in).
-                if (AnticRunning(guidLow))
+                // Mid-antic or mid-conversation: let it finish first (a duel would cut it off).
+                if (AnticRunning(guidLow) || Talking(bot))
                     continue;
                 auto duelCd = _botDuelCooldown.find(guidLow);
                 if (duelCd != _botDuelCooldown.end() && duelCd->second > now)
@@ -4087,7 +4087,8 @@ namespace PvPLife
                 }
 
                 // An antic or a fidget stroll under way moves the bot itself; leave it be until it ends.
-                if (AnticRunning(participant.Bot.GuidLow) || FidgetWalking(participant.Bot.GuidLow, bot))
+                // So does a Chat conversation it is cast in.
+                if (AnticRunning(participant.Bot.GuidLow) || FidgetWalking(participant.Bot.GuidLow, bot) || Talking(bot))
                     continue;
 
                 if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
@@ -4229,7 +4230,8 @@ namespace PvPLife
                 Player* bot = FindPlayer(participant.Bot.GuidLow);
                 if (IsHumanControlled(bot))
                     continue;
-                if (!bot || !bot->IsInWorld() || !bot->IsAlive() || bot->duel || bot->IsInCombat() || bot->IsBeingTeleported())
+                if (!bot || !bot->IsInWorld() || !bot->IsAlive() || bot->duel || bot->IsInCombat() || bot->IsBeingTeleported() ||
+                    Talking(bot))
                     continue;
                 auto botCd = _botChallengeCooldown.find(participant.Bot.GuidLow);
                 if (botCd != _botChallengeCooldown.end() && botCd->second > now)
