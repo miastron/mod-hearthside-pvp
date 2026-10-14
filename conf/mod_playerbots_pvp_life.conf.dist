@@ -438,9 +438,11 @@ PvPLife.Antics.Enable = 1
 #
 #   PvPLife.Antics.ChancePerMinute
 #       Description: Percent chance (0-100) that an idle duel-ground bot starts an antic in any given minute.
-#       Default:     10
+#                    Bots are idle for only about a minute between duels (and are not paired again
+#                    until an antic finishes), so this is higher than City Life's.
+#       Default:     30
 #
-PvPLife.Antics.ChancePerMinute = 10
+PvPLife.Antics.ChancePerMinute = 30
 
 #
 #   PvPLife.Antics.CooldownSeconds

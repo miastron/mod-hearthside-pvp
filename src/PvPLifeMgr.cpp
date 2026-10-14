@@ -397,8 +397,10 @@ namespace PvPLife
         _footworkTrace = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Trace", false);
         {
             // Duel grounds pack staging spots 20 yards apart: keep the hopping tighter than City's.
+            // Their idle spells between duels are short (about a minute), so the odds per minute are higher.
             LifeMotion::AnticConfig defaults;
             defaults.Radius = 6.0f;
+            defaults.ChancePerMinute = 30;
             _antics = LifeMotion::LoadAnticConfig("PvPLife.Antics", defaults);
         }
         _challengeRealPlayers = sConfigMgr->GetOption<bool>("PvPLife.Duel.ChallengeRealPlayers", true);
@@ -3760,6 +3762,9 @@ namespace PvPLife
                 }
 
                 if (!BotActive(bot))
+                    continue;
+                // Mid-antic: let it finish first (a duel would cut it off a few seconds in).
+                if (AnticRunning(guidLow))
                     continue;
                 auto duelCd = _botDuelCooldown.find(guidLow);
                 if (duelCd != _botDuelCooldown.end() && duelCd->second > now)
