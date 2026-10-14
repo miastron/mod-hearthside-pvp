@@ -395,6 +395,20 @@ namespace PvPLife
         _footworkIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMaxMs", 2500), _footworkIntervalMinMs, 60000);
         _footworkJumpChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.JumpChance", 35));
         _footworkTrace = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Trace", false);
+        {
+            auto matchup = [this](char const* key, DuelRole a, DuelRole b, uint32 fallback)
+            {
+                uint32 chance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>(
+                    std::string("PvPLife.Duel.Matchup.") + key, fallback));
+                _duelMatchup[uint8(a)][uint8(b)] = _duelMatchup[uint8(b)][uint8(a)] = chance;
+            };
+            matchup("DpsVsDps", DuelRole::Dps, DuelRole::Dps, 100);
+            matchup("DpsVsTank", DuelRole::Dps, DuelRole::Tank, 70);
+            matchup("TankVsTank", DuelRole::Tank, DuelRole::Tank, 25);
+            matchup("DpsVsHealer", DuelRole::Dps, DuelRole::Healer, 10);
+            matchup("HealerVsHealer", DuelRole::Healer, DuelRole::Healer, 5);
+            matchup("TankVsHealer", DuelRole::Tank, DuelRole::Healer, 0);
+        }
         _idleFidgetEnable = sConfigMgr->GetOption<bool>("PvPLife.Duel.IdleFidget.Enable", true);
         _idleFidgetMinSeconds = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.IdleFidget.MinSeconds", 6), 2, 600);
         _idleFidgetMaxSeconds = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.IdleFidget.MaxSeconds", 20), _idleFidgetMinSeconds, 600);
@@ -2944,7 +2958,9 @@ namespace PvPLife
             uint32 maxGap = std::min<uint32>(2, _botDuelMaxLevelDifference);
             auto pairs = SelectDiverseDuelPairs(attackerPool, defenderPool,
                 std::min(attackerNeed, defenderNeed), _botDuelMaxLevelDifference,
-                [maxGap]() { return unsigned(urand(0, maxGap)); });
+                [maxGap]() { return unsigned(urand(0, maxGap)); },
+                [this](BotCandidate const& a, BotCandidate const& b)
+                    { return RollMatchup(FindPlayer(a.GuidLow), FindPlayer(b.GuidLow)); });
             attackers = std::move(pairs.first);
             defenders = std::move(pairs.second);
         }
@@ -3993,7 +4009,7 @@ namespace PvPLife
                     if (distance > _duelLeashRadius * 2.0f)
                         continue;
                     uint32 levelDiff = std::abs(static_cast<int32>(a->GetLevel()) - static_cast<int32>(candidate->GetLevel()));
-                    if (levelDiff <= _botDuelMaxLevelDifference)
+                    if (levelDiff <= _botDuelMaxLevelDifference && RollMatchup(a, candidate))
                         compatibleIndexes.emplace_back(distance, i);
                 }
 
@@ -4037,6 +4053,23 @@ namespace PvPLife
                 }
             }
         }
+    }
+
+    Manager::DuelRole Manager::RoleOf(Player* player)
+    {
+        if (!player)
+            return DuelRole::Dps;
+        if (PlayerbotAI::IsHeal(player))
+            return DuelRole::Healer;
+        if (PlayerbotAI::IsTank(player))
+            return DuelRole::Tank;
+        return DuelRole::Dps;
+    }
+
+    bool Manager::RollMatchup(Player* a, Player* b) const
+    {
+        uint32 chance = _duelMatchup[uint8(RoleOf(a))][uint8(RoleOf(b))];
+        return chance >= 100 || (chance > 0 && urand(1, 100) <= chance);
     }
 
     void Manager::MaintainDuelParticipants()
@@ -4877,6 +4910,8 @@ namespace PvPLife
             [](auto const& entry) { return LifeMotion::Running(entry.second); }));
         handler->PSendSysMessage("Antics: enabled={} running={} chance={}%/min cooldown={}s hopDismount={}%",
             _antics.Enable ? 1 : 0, anticsRunning, _antics.ChancePerMinute, _antics.CooldownSeconds, _antics.HopDismountChance);
+        handler->PSendSysMessage("Duel matchups %: dps/dps={} dps/tank={} tank/tank={} dps/healer={} healer/healer={} tank/healer={}",
+            _duelMatchup[0][0], _duelMatchup[0][1], _duelMatchup[1][1], _duelMatchup[0][2], _duelMatchup[2][2], _duelMatchup[1][2]);
         handler->PSendSysMessage("Duel medics: enabled={} medics={}% of healers chance={}% max={} radius={} pending={}",
             _medics.Enable ? 1 : 0, _medics.MedicPercent, _medics.Chance, _medics.MaxPerDuel, _medics.Radius, _pendingHeals.size());
 

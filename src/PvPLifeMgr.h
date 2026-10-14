@@ -151,6 +151,11 @@ namespace PvPLife
         void ProcessChatQueue();
         void ProcessRealPlayerChallenges();
         void MaintainDuelParticipants();
+        // Role matchups for bot duels (PvPLife.Duel.Matchup.*): DPS vs DPS always, a healer rarely,
+        // since healer duels drag on until someone gives up. Rolled per candidate pair.
+        enum class DuelRole : uint8 { Dps = 0, Tank = 1, Healer = 2 };
+        static DuelRole RoleOf(Player* player); // null (offline candidate) counts as DPS
+        bool RollMatchup(Player* a, Player* b) const;
         void MaintainBotDuels();
         // Player-like movement for leased bots fighting a player, by class and spec
         // (PvPLifeFootwork.h, PvPLife.Footwork.*); playerbots' own combat AI only closes to range or flees.
@@ -311,6 +316,7 @@ namespace PvPLife
         uint32 _botChallengeCooldownSeconds = 180;
         uint32 _botDuelCooldownSeconds = 45;
         uint32 _botDuelMaxLevelDifference = 2;
+        uint32 _duelMatchup[3][3] = { { 100, 70, 10 }, { 70, 25, 0 }, { 10, 0, 5 } }; // [DuelRole][DuelRole], %
         bool _footworkDuels = true;
         bool _footworkWorldPvp = true;
         bool _footworkBattlegrounds = false;

@@ -374,6 +374,22 @@ PvPLife.Duel.LeashRadius = 40
 PvPLife.Duel.GuardIntervalMs = 1000
 
 #
+#   PvPLife.Duel.Matchup.DpsVsDps / DpsVsTank / TankVsTank / DpsVsHealer / HealerVsHealer / TankVsHealer
+#       Description: Percent chance (0-100) that two bots of these roles may be paired for a duel, rolled
+#                    each time the pair comes up (pairing runs every PvPLife.TickSeconds, so a rare matchup
+#                    still happens now and then). Healer duels drag on with little damage until someone
+#                    gives up, so a healer is rarely paired. Roles come from mod-playerbots' spec checks
+#                    (a feral druid in bear form counts as a tank).
+#       Default:     100, 70, 25, 10, 5, 0
+#
+PvPLife.Duel.Matchup.DpsVsDps = 100
+PvPLife.Duel.Matchup.DpsVsTank = 70
+PvPLife.Duel.Matchup.TankVsTank = 25
+PvPLife.Duel.Matchup.DpsVsHealer = 10
+PvPLife.Duel.Matchup.HealerVsHealer = 5
+PvPLife.Duel.Matchup.TankVsHealer = 0
+
+#
 #   PvPLife.Duel.IdleFidget.Enable / MinSeconds / MaxSeconds
 #       Description: Between bouts an idle duelist now and then strolls to another spot within 6 yards of
 #                    its staging spot, or turns to watch a duel nearby, its partner, a real player close by

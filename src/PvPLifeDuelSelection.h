@@ -15,12 +15,27 @@ namespace PvPLife
     // reserve complete compatible pairs; never change a character's level.
     // `pickGap` draws the level gap each pair aims for: the closest gap is not the
     // goal, since every duel at the exact same level is a tell (realm 2026-10-12:
-    // 19 vs 19, 36 vs 36 down the line).
-    template<class Candidate, class GapPicker>
+    // 19 vs 19, 36 vs 36 down the line). `accept(a, b)` vetoes a pair (the role
+    // matchup); it is asked about each pair at most once per call.
+    template<class Candidate, class GapPicker, class Accept>
     std::pair<std::vector<Candidate>, std::vector<Candidate>> SelectDiverseDuelPairs(
         std::vector<Candidate> const& attackers, std::vector<Candidate> const& defenders,
-        std::size_t maxPairs, unsigned maxDifference, GapPicker pickGap)
+        std::size_t maxPairs, unsigned maxDifference, GapPicker pickGap, Accept accept)
     {
+        std::unordered_set<std::uint64_t> vetoed, accepted;
+        auto allowed = [&](Candidate const& a, Candidate const& b)
+        {
+            std::uint32_t lo = a.GuidLow < b.GuidLow ? a.GuidLow : b.GuidLow;
+            std::uint32_t hi = a.GuidLow < b.GuidLow ? b.GuidLow : a.GuidLow;
+            std::uint64_t key = (std::uint64_t(lo) << 32) | hi;
+            if (vetoed.count(key))
+                return false;
+            if (accepted.count(key))
+                return true;
+            bool ok = accept(a, b);
+            (ok ? accepted : vetoed).insert(key);
+            return ok;
+        };
         std::pair<std::vector<Candidate>, std::vector<Candidate>> result;
         std::unordered_set<std::uint32_t> used;
         std::array<unsigned, 3> bands{};
@@ -40,7 +55,7 @@ namespace PvPLife
                     if (a.GuidLow == b.GuidLow || a.Team != b.Team || used.count(b.GuidLow))
                         continue;
                     unsigned difference = a.Level > b.Level ? a.Level - b.Level : b.Level - a.Level;
-                    if (difference > maxDifference)
+                    if (difference > maxDifference || !allowed(a, b))
                         continue;
                     unsigned level = (unsigned(a.Level) + unsigned(b.Level)) / 2;
                     unsigned band = level < 30 ? 0 : level < 50 ? 1 : 2;
