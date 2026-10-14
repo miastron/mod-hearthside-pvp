@@ -97,6 +97,8 @@ world thread.
   `LifeArchetypes` (Chat registers the provider). PvP never includes Chat's headers. Without a
   provider (Chat not installed, or `HearthsideChat.Enable`/`HearthsideChat.Life.Enable` off) every bot
   fits.
+- **Events:** a reactive raid defense that deploys publishes `LifeEvents::RaidDefenseStarted`
+  (`StartPendingRaidResponses`). Chat drops it until it has dataset rows for it.
 - **Busy marks:** Chat marks the bots it casts in a /say scene (`LifeActivity`). `Manager::Talking`
   keeps such a bot out of duel and real-player-challenge picks, antics and fidgets
   (`MaintainDuelParticipants`) and the linger release (`DuelIdle`) until the scene ends.

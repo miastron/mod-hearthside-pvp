@@ -4794,6 +4794,20 @@ namespace PvPLife
                 " trigger=" + std::to_string(pending.TriggerGuidLow) + " team=" + TeamName(pending.ResponseTeam) +
                 " responders=" + std::to_string(event.Members.size()) + " dropped=" + std::to_string(skipped) +
                 " durationSeconds=" + std::to_string(event.DurationSeconds));
+
+            // A plain fact for whoever listens (mod-hearthside-chat); nobody speaks for PvP itself.
+            LifeEvents::Event fact;
+            fact.Type = LifeEvents::Kind::RaidDefenseStarted;
+            fact.From = PlayerbotsLife::ReservationOwner::PvPLife;
+            fact.Actor = ObjectGuid::Create<HighGuid::Player>(event.Members.front().Bot.GuidLow).GetRawValue();
+            fact.MapId = pending.MapId;
+            fact.X = pending.TargetX;
+            fact.Y = pending.TargetY;
+            fact.Z = pending.TargetZ;
+            fact.Witness = leader->GetGUID().GetRawValue();
+            fact.Detail = event.EventZone.Name;
+            LifeEvents::Publish(fact);
+
             _activeEvents.push_back(std::move(event));
         }
         _pendingResponses.erase(std::remove_if(_pendingResponses.begin(), _pendingResponses.end(),
