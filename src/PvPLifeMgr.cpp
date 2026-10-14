@@ -2140,6 +2140,43 @@ namespace PvPLife
         return true;
     }
 
+    void Manager::KeepDuelStrategies()
+    {
+        for (ActiveEvent const& event : _activeEvents)
+        {
+            if (event.Closing || event.EventZone.Type != ActivityType::Duel)
+                continue;
+            for (Participant const& participant : event.Members)
+            {
+                Player* bot = FindPlayer(participant.Bot.GuidLow);
+                if (!bot || !bot->duel || !participant.Deployed || IsHumanControlled(bot) ||
+                    !PlayerbotsLife::ValidateActiveLease(participant.Token))
+                    continue;
+                PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+                if (!ai || (ai->HasStrategy("stay", BOT_STATE_NON_COMBAT) &&
+                    !ai->HasStrategy("new rpg", BOT_STATE_NON_COMBAT) && !ai->HasStrategy("mount", BOT_STATE_NON_COMBAT)))
+                    continue;
+                ApplyPvpStrategies(bot, true);
+                // Whatever the defaults already started: stand still for the countdown.
+                if (bot->duel->State == DUEL_STATE_COUNTDOWN)
+                {
+                    if (bot->IsMounted() || bot->HasMountedAura())
+                    {
+                        bot->Dismount();
+                        bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+                    }
+                    if (bot->isMoving())
+                    {
+                        bot->StopMoving();
+                        bot->GetMotionMaster()->Clear();
+                    }
+                }
+                if (_footworkTrace)
+                    AuditLog("DUELSTRAT", "bot=" + bot->GetName() + " restored after mod-playerbots' duel-accept reset");
+            }
+        }
+    }
+
     void Manager::UpdateAntics()
     {
         uint32 now = uint32(NowMs());
@@ -4638,6 +4675,7 @@ namespace PvPLife
         if (_anticTimerMs >= 100)
         {
             _anticTimerMs = 0;
+            KeepDuelStrategies();
             UpdateAntics();
         }
         if (managementTick)

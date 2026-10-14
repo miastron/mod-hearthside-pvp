@@ -166,6 +166,10 @@ namespace PvPLife
         // Idle antics for duel-ground bots between bouts and a mid-air dismount for riders coming in
         // (LifeMotion.h, PvPLife.Antics.*). Run every ~100 ms from Update.
         void UpdateAntics();
+        // mod-playerbots' AcceptDuelAction resets a bot's strategies to its random-bot defaults the
+        // moment it accepts, so during the countdown "new rpg" walked it off and "mount" rode it away
+        // until the challenge broke off. Puts the duel set straight back (every ~100 ms from Update).
+        void KeepDuelStrategies();
         // Starts `kind` on an idle duelist now; with None, rolls PvPLife.Antics.ChancePerMinute and picks one.
         bool TryStartAntic(Player* bot, uint32 guidLow, LifeMotion::Antic kind = LifeMotion::Antic::None);
         void StopAntic(uint32 guidLow);
