@@ -285,6 +285,9 @@ namespace PvPLife
         ++_dataGeneration;
         PlayerbotsLife::CancelAdmissionRequest(0, PlayerbotsLife::ReservationOwner::PvPLife);
         CancelPendingRaidResponse(0, "shutdown");
+        for (auto const& [guid, routine] : _anticRoutines)
+            LifeMotion::Halt(FindPlayer(guid), routine);
+        _anticRoutines.clear();
         for (ActiveEvent& e : _activeEvents)
             EndEvent(e, "shutdown");
         _activeEvents.clear();
@@ -392,6 +395,12 @@ namespace PvPLife
         _footworkIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMaxMs", 2500), _footworkIntervalMinMs, 60000);
         _footworkJumpChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.JumpChance", 35));
         _footworkTrace = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Trace", false);
+        {
+            // Duel grounds pack staging spots 20 yards apart: keep the hopping tighter than City's.
+            LifeMotion::AnticConfig defaults;
+            defaults.Radius = 6.0f;
+            _antics = LifeMotion::LoadAnticConfig("PvPLife.Antics", defaults);
+        }
         _challengeRealPlayers = sConfigMgr->GetOption<bool>("PvPLife.Duel.ChallengeRealPlayers", true);
         _realPlayerChallengeChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Duel.PlayerChallengeChance", 25));
         _realPlayerScanRadius = std::min<uint32>(1000, sConfigMgr->GetOption<uint32>("PvPLife.Duel.PlayerScanRadius", 55));
@@ -1550,6 +1559,7 @@ namespace PvPLife
         step.X = x; step.Y = y; step.Z = z; step.O = o;
         step.Teleport = teleport;
         _moveQueue.push_back(step);
+        StopAntic(guidLow);
     }
 
     bool Manager::ScheduleDuel(uint64 eventId, uint64 pairId, PlayerbotsLife::LeaseToken const& challengerToken,
@@ -1595,6 +1605,8 @@ namespace PvPLife
         step.TargetIsRealPlayer = realPlayerTarget;
         step.ChallengeClaimExpiry = challengeClaimExpiry;
         _duelQueue.push_back(step);
+        StopAntic(challengerGuid);
+        StopAntic(targetGuid);
         return true;
     }
 
@@ -2056,92 +2068,122 @@ namespace PvPLife
     bool Manager::FootworkStep(Player* bot, Unit* face, float angle, float distance, Position const& from, bool jump,
         FootworkBound const& bound)
     {
-        float x = from.GetPositionX() + std::cos(angle) * distance;
-        float y = from.GetPositionY() + std::sin(angle) * distance;
-        float z = bot->GetPositionZ();
-        if (!bot->GetMap()->CanReachPositionAndGetValidCoords(bot, x, y, z) || std::fabs(z - bot->GetPositionZ()) > 3.0f)
+        // One continuous curve around `from` (the opponent, for every move but the edge return) or a
+        // jump, still facing the opponent and backpedalling when giving ground (LifeMotion::Launch).
+        LifeMotion::Move move;
+        move.From = from;
+        move.Angle = angle;
+        move.Distance = distance;
+        move.Jump = jump;
+        move.Face = face;
+        LifeMotion::Landing landing;
+        if (!LifeMotion::Launch(bot, move, bound, &landing))
             return false;
-        if (bound.Radius > 0.0f && std::hypot(x - bound.X, y - bound.Y) > bound.Radius)
-            return false;
-        if (bound.HomeRadius > 0.0f && std::hypot(x - bound.HomeX, y - bound.HomeY) > bound.HomeRadius)
-            return false;
-        float step = bot->GetExactDist2d(x, y);
-        if (step < 1.0f)
-            return false;
-
-        int32 durationMs = 0;
-        if (jump && step <= 9.0f)
-        {
-            // A player's jump arc, still facing the opponent.
-            float speedXY = std::max(step / 0.83f, 2.0f);
-            bot->GetMotionMaster()->MoveJump(x, y, z, speedXY, 7.96f, 0, face);
-            durationMs = int32(step / speedXY * 1000.0f);
-        }
-        else
-        {
-            // One continuous curve instead of a straight hop: interpolate around `from` (the
-            // opponent, for every move but the edge return) in angle and radius, so circling bends
-            // with the target and a back-off runs straight out. The bot keeps facing its opponent
-            // the whole way, backpedalling when it gives ground, the way a player strafes.
-            float startAngle = from.GetAngle(bot->GetPositionX(), bot->GetPositionY());
-            float startRadius = from.GetExactDist2d(bot->GetPositionX(), bot->GetPositionY());
-            float sweep = Position::NormalizeOrientation(angle - startAngle);
-            if (sweep > float(M_PI))
-                sweep -= 2.0f * float(M_PI);
-            if (startRadius < 1.0f)
-            {
-                startAngle = angle;
-                sweep = 0.0f;
-            }
-            uint32 points = std::clamp<uint32>(uint32(step / 1.5f), 2, 8);
-            Movement::PointsArray path;
-            path.push_back(G3D::Vector3(bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ()));
-            for (uint32 i = 1; i <= points; ++i)
-            {
-                float t = float(i) / float(points);
-                float pa = startAngle + sweep * t;
-                float pr = startRadius + (distance - startRadius) * t;
-                float px = i == points ? x : from.GetPositionX() + std::cos(pa) * pr;
-                float py = i == points ? y : from.GetPositionY() + std::sin(pa) * pr;
-                float pz = i == points ? z : bot->GetPositionZ();
-                if (i != points)
-                    bot->UpdateAllowedPositionZ(px, py, pz);
-                if (std::fabs(pz - path.back().z) > 2.5f)
-                    return false; // a ledge or a wall mid-curve: skip this move
-                path.push_back(G3D::Vector3(px, py, pz));
-            }
-            // Drop the chase or point movement first, or its next update relaunches over this spline.
-            bot->GetMotionMaster()->MoveIdle();
-            Movement::MoveSplineInit init(bot);
-            init.MovebyPath(path);
-            if (face)
-            {
-                init.SetFacing(face);
-                float travel = std::atan2(y - bot->GetPositionY(), x - bot->GetPositionX());
-                float awayFromFace = face->GetAngle(bot);
-                if (std::cos(travel - awayFromFace) > 0.7f)
-                    init.SetOrientationInversed(); // giving ground: backpedal
-            }
-            durationMs = init.Launch();
-        }
-
-        // Ask mod-playerbots' own movement to wait the move out rather than redirect it halfway.
-        if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
-            ai->GetAiObjectContext()->GetValue<LastMovement&>("last movement")->Get().Set(
-                bot->GetMapId(), x, y, z, bot->GetOrientation(), float(std::max(durationMs, 300)),
-                MovementPriority::MOVEMENT_FORCED);
 
         // Measure whether anything still redirects it (PvPLife.Footwork.Trace).
         if (_footworkTrace)
         {
             FootworkCheck check;
-            check.DueMs = NowMs() + uint64(std::clamp(durationMs / 2, 250, 1500));
-            check.X = x;
-            check.Y = y;
-            check.Jump = jump && step <= 9.0f;
+            check.DueMs = NowMs() + uint64(std::clamp(landing.DurationMs / 2, 250, 1500));
+            check.X = landing.X;
+            check.Y = landing.Y;
+            check.Jump = landing.Jumped;
             _footworkChecks[bot->GetGUID().GetCounter()] = check;
         }
         return true;
+    }
+
+    Participant const* Manager::FindDuelGroundParticipant(uint32 guidLow) const
+    {
+        for (ActiveEvent const& event : _activeEvents)
+        {
+            if (event.Closing || !event.FullyPrepared || event.EventZone.Type != ActivityType::Duel)
+                continue;
+            for (Participant const& participant : event.Members)
+                if (participant.Bot.GuidLow == guidLow)
+                    return participant.Deployed && PlayerbotsLife::ValidateActiveLease(participant.Token) ? &participant : nullptr;
+        }
+        return nullptr;
+    }
+
+    bool Manager::AnticRunning(uint32 guidLow) const
+    {
+        auto it = _anticRoutines.find(guidLow);
+        return it != _anticRoutines.end() && LifeMotion::Running(it->second);
+    }
+
+    void Manager::StopAntic(uint32 guidLow)
+    {
+        auto it = _anticRoutines.find(guidLow);
+        if (it != _anticRoutines.end() && LifeMotion::Running(it->second))
+            LifeMotion::End(FindPlayer(guidLow), it->second, uint32(NowMs()), _antics);
+    }
+
+    bool Manager::TryStartAntic(Player* bot, uint32 guidLow, LifeMotion::Antic kind)
+    {
+        uint32 now = uint32(NowMs());
+        LifeMotion::Routine& routine = _anticRoutines[guidLow];
+        if (kind == LifeMotion::Antic::None)
+        {
+            if (!LifeMotion::Ready(routine, now) || !LifeMotion::RollAntic(_antics, _duelGuardIntervalMs))
+                return false;
+            kind = LifeMotion::PickAntic(_antics);
+        }
+        else if (LifeMotion::Running(routine))
+            LifeMotion::End(bot, routine, now, _antics);
+        if (!LifeMotion::Begin(bot, routine, kind, now, _antics))
+            return false;
+        if (_debug)
+            AuditLog("ANTIC", "bot=" + bot->GetName() + " antic=" + LifeMotion::AnticName(kind));
+        return true;
+    }
+
+    void Manager::UpdateAntics()
+    {
+        uint32 now = uint32(NowMs());
+
+        // Riders coming in to a duel ground: some hop and get off in mid-air instead of stopping first.
+        if (_antics.Enable && _antics.HopDismountChance)
+        {
+            for (uint32 guid : _dismountOnArrival)
+            {
+                if (_hopDismountRolled.count(guid))
+                    continue;
+                Player* bot = FindPlayer(guid);
+                Participant const* participant = FindDuelGroundParticipant(guid);
+                if (!bot || !participant || !bot->IsMounted() || !bot->isMoving() || IsHumanControlled(bot) ||
+                    bot->GetDistance2d(participant->ActivityX, participant->ActivityY) > 9.0f)
+                    continue;
+                _hopDismountRolled.insert(guid);
+                if (urand(1, 100) <= _antics.HopDismountChance)
+                    LifeMotion::BeginHopDismount(bot, _anticRoutines[guid], participant->ActivityX, participant->ActivityY, now);
+            }
+        }
+
+        for (auto& [guid, routine] : _anticRoutines)
+        {
+            if (!LifeMotion::Running(routine))
+                continue;
+            Player* bot = FindPlayer(guid);
+            Participant const* participant = FindDuelGroundParticipant(guid);
+            bool going = bot && participant && !IsHumanControlled(bot) &&
+                (routine.Kind == LifeMotion::Antic::HopDismount || BotActive(bot));
+            if (going)
+            {
+                // Stay clear of the neighbouring staging spots (20 yards apart) and their duels.
+                LifeMotion::Bound home;
+                home.HomeX = participant->ActivityX;
+                home.HomeY = participant->ActivityY;
+                home.HomeRadius = DuelHomeAreaRadius + 4.0f;
+                going = LifeMotion::Advance(bot, routine, now, _antics, home);
+            }
+            if (!going)
+            {
+                if (routine.Kind == LifeMotion::Antic::HopDismount)
+                    _dismountOnArrival.erase(guid);
+                LifeMotion::End(bot, routine, now, _antics);
+            }
+        }
     }
 
     void Manager::ProcessFootworkChecks()
@@ -2296,6 +2338,18 @@ namespace PvPLife
             it = leasedGuids.count(*it) ? std::next(it) : _dismountOnArrival.erase(it);
         for (auto it = _idleReturnPoint.begin(); it != _idleReturnPoint.end();)
             it = leasedGuids.count(it->first) ? std::next(it) : _idleReturnPoint.erase(it);
+        for (auto it = _anticRoutines.begin(); it != _anticRoutines.end();)
+        {
+            if (leasedGuids.count(it->first))
+                ++it;
+            else
+            {
+                LifeMotion::Halt(FindPlayer(it->first), it->second);
+                it = _anticRoutines.erase(it);
+            }
+        }
+        for (auto it = _hopDismountRolled.begin(); it != _hopDismountRolled.end();)
+            it = _dismountOnArrival.count(*it) ? std::next(it) : _hopDismountRolled.erase(it);
 
         auto& brackets = sPlayerbotAIConfig.LevelBracketsExcludeNames;
         auto& resets = sPlayerbotAIConfig.ResetBotLevelExcludeNames;
@@ -2994,6 +3048,7 @@ namespace PvPLife
 
         // Clear any queued bot-directed steps for this departing participant immediately (PVP-01)
         uint32 guid = part.Bot.GuidLow;
+        StopAntic(guid);
         _moveQueue.erase(std::remove_if(_moveQueue.begin(), _moveQueue.end(),
             [guid](MoveStep const& s) { return s.GuidLow == guid; }), _moveQueue.end());
         EraseDuelSteps([guid](DuelStep const& s) { return s.ChallengerGuidLow == guid || s.TargetGuidLow == guid; });
@@ -3836,6 +3891,10 @@ namespace PvPLife
                     continue;
                 }
 
+                // An antic under way moves the bot itself (UpdateAntics); leave it be until it ends.
+                if (AnticRunning(participant.Bot.GuidLow))
+                    continue;
+
                 if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
                 {
                     if (!ai->HasStrategy("duel", BOT_STATE_NON_COMBAT) ||
@@ -3885,6 +3944,10 @@ namespace PvPLife
                     bot->ClearUnitState(UNIT_STATE_CHASE);
                     bot->ClearUnitState(UNIT_STATE_FOLLOW);
                 }
+
+                // Between bouts, now and then an antic: a dance, a strafe, a few hops (PvPLife.Antics.*).
+                if (!bot->isMoving() && BotActive(bot) && TryStartAntic(bot, participant.Bot.GuidLow))
+                    continue;
 
                 // Watching a duel nearby: now and then applaud, cheer, roar or flex. About 4% a
                 // second, whatever the guard interval.
@@ -4566,6 +4629,12 @@ namespace PvPLife
         else
             _duelGuardTimerMs -= diff;
         UpdateFootwork();
+        _anticTimerMs += diff;
+        if (_anticTimerMs >= 100)
+        {
+            _anticTimerMs = 0;
+            UpdateAntics();
+        }
         if (managementTick)
         {
             uint32 nowSec = GameTimeSeconds();
@@ -4606,6 +4675,11 @@ namespace PvPLife
             _maxTotal == 0 ? "uncapped" : std::to_string(_maxTotal).c_str(),
             _proportionalZoneScaling ? 1 : 0,
             _botAccountPrefix, _respectPlayerbotActivity ? 1 : 0, _minOnlineRequired);
+
+        uint32 anticsRunning = uint32(std::count_if(_anticRoutines.begin(), _anticRoutines.end(),
+            [](auto const& entry) { return LifeMotion::Running(entry.second); }));
+        handler->PSendSysMessage("Antics: enabled={} running={} chance={}%/min cooldown={}s hopDismount={}%",
+            _antics.Enable ? 1 : 0, anticsRunning, _antics.ChancePerMinute, _antics.CooldownSeconds, _antics.HopDismountChance);
 
         handler->PSendSysMessage("Audit: linesWritten={} dropped={} openFailures={} writeFailures={} inQueue={}",
             sPvPLifeAudit.GetLinesWritten(), sPvPLifeAudit.GetDroppedCount(),
@@ -4776,7 +4850,7 @@ namespace PvPLife
         handler->PSendSysMessage("{} compat", cmdPrefix);
         handler->PSendSysMessage("{} reservations", cmdPrefix);
         handler->PSendSysMessage("{} response status | stop <id|all>", cmdPrefix);
-        handler->PSendSysMessage("{} debug [status | validate | bot <guid|name>]", cmdPrefix);
+        handler->PSendSysMessage("{} debug [status | validate | bot <guid|name> | antic <name> <antic>]", cmdPrefix);
         handler->PSendSysMessage("{} zone list", cmdPrefix);
         handler->PSendSysMessage("{} zone create <name> <type> <attacker> <defender> <minLvl> <maxLvl>   (created disabled)", cmdPrefix);
         handler->PSendSysMessage("   <type>: skirmish, duel, forthehorde, forthealliance; <attacker>/<defender>: alliance, horde, any");
@@ -5188,6 +5262,21 @@ namespace PvPLife
             bool isRes = PlayerbotsLife::IsReserved(guidLow);
             handler->PSendSysMessage("Bot guid={}: online={} participant={} reserved={}",
                 guidLow, p ? "YES" : "NO", isPart ? "YES" : "NO", isRes ? "YES" : "NO");
+            return true;
+        }
+        if (sub == "antic" && args.size() >= 4)
+        {
+            // Plays an antic on an idle duelist right away, to see what it looks like.
+            Player* p = ObjectAccessor::FindPlayerByName(args[2]);
+            LifeMotion::Antic kind = LifeMotion::AnticFromName(args[3]);
+            if (!p || !FindDuelGroundParticipant(p->GetGUID().GetCounter()))
+                handler->PSendSysMessage("'{}' is not a bot on a duel ground right now.", args[2]);
+            else if (kind == LifeMotion::Antic::None || kind == LifeMotion::Antic::HopDismount)
+                handler->PSendSysMessage("Antics: Dance, Strafe, HopBackForth, HopSideToSide, BunnyHop.");
+            else if (p->duel || p->IsInCombat() || !TryStartAntic(p, p->GetGUID().GetCounter(), kind))
+                handler->PSendSysMessage("{} is busy (dueling or fighting).", p->GetName());
+            else
+                handler->PSendSysMessage("{} starts {}.", p->GetName(), LifeMotion::AnticName(kind));
             return true;
         }
         PrintDebugStatus(handler);

@@ -8,6 +8,13 @@
 #define PVP_LIFE_MGR_H
 
 #include "PvPLifeTypes.h"
+// The movement primitive and idle antics are City Life's (one copy for both modules), so this
+// module needs mod-hearthside-city checked out beside it.
+#if __has_include("../../mod-hearthside-city/src/LifeMotion.h")
+#include "../../mod-hearthside-city/src/LifeMotion.h"
+#else
+#error "mod-hearthside-pvp requires mod-hearthside-city beside it in modules/ (for its LifeMotion.h)"
+#endif
 #include "AsyncCallbackProcessor.h"
 #include "Position.h"
 #include "QueryCallback.h"
@@ -143,13 +150,8 @@ namespace PvPLife
         void MaintainBotDuels();
         // Player-like movement for leased bots fighting a player, by class and spec
         // (PvPLifeFootwork.h, PvPLife.Footwork.*); playerbots' own combat AI only closes to range or flees.
-        struct FootworkBound
-        {
-            float X = 0.0f, Y = 0.0f;
-            float Radius = 0.0f; // 0 = unbounded
-            float HomeX = 0.0f, HomeY = 0.0f;
-            float HomeRadius = 0.0f; // the bot's own staging spot; 0 = none
-        };
+        // Radius around X/Y and HomeRadius around the bot's own staging spot; 0 = unbounded.
+        using FootworkBound = LifeMotion::Bound;
         void UpdateFootwork();
         // Any of this realm's own bots fighting a player in a battleground, not only leased ones.
         void UpdateBattlegroundFootwork(uint64 now);
@@ -161,6 +163,15 @@ namespace PvPLife
         bool FootworkStep(Player* bot, Unit* face, float angle, float distance, Position const& from, bool jump,
             FootworkBound const& bound);
         void ProcessFootworkChecks();
+        // Idle antics for duel-ground bots between bouts and a mid-air dismount for riders coming in
+        // (LifeMotion.h, PvPLife.Antics.*). Run every ~100 ms from Update.
+        void UpdateAntics();
+        // Starts `kind` on an idle duelist now; with None, rolls PvPLife.Antics.ChancePerMinute and picks one.
+        bool TryStartAntic(Player* bot, uint32 guidLow, LifeMotion::Antic kind = LifeMotion::Antic::None);
+        void StopAntic(uint32 guidLow);
+        bool AnticRunning(uint32 guidLow) const;
+        // A deployed, leased member of a prepared duel-zone event, or null.
+        Participant const* FindDuelGroundParticipant(uint32 guidLow) const;
         struct FootworkCheck
         {
             uint64 DueMs = 0;
@@ -290,6 +301,10 @@ namespace PvPLife
         uint32 _footworkIntervalMaxMs = 2500;
         uint32 _footworkJumpChance = 35;
         std::unordered_map<uint32, uint64> _footworkNextMs;
+        LifeMotion::AnticConfig _antics;
+        std::unordered_map<uint32, LifeMotion::Routine> _anticRoutines; // idle entries keep the cooldown
+        std::unordered_set<uint32> _hopDismountRolled; // riders already rolled for a mid-air dismount
+        uint32 _anticTimerMs = 0;
         std::unordered_set<std::string> _levelExcludeNamesAdded;
 
         // Campaigns & chatter

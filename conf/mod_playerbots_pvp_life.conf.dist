@@ -423,6 +423,72 @@ PvPLife.Footwork.JumpChance = 35
 PvPLife.Footwork.Trace = 0
 
 #
+#   PvPLife.Antics.Enable
+#       Description: Between bouts an idle bot on a duel ground now and then plays out an antic: Dance
+#                    (/dance), Strafe (quick side-to-side steps, facing fixed), HopBackForth (hops forward
+#                    and back, backpedalling or turning round between hops), HopSideToSide (strafe hops)
+#                    or BunnyHop (hop after hop round a circle, a figure 8 or a zigzag). It stops at once
+#                    when the bot is picked for a duel, fights, is released or mod-playerbots pauses it.
+#                    The code is mod-hearthside-city's src/LifeMotion.h, shared with City Life's
+#                    CityLife.Antics.*. Test one with .pvplife debug antic <name> <antic>.
+#       Default:     1 (Enabled)
+#
+PvPLife.Antics.Enable = 1
+
+#
+#   PvPLife.Antics.ChancePerMinute
+#       Description: Percent chance (0-100) that an idle duel-ground bot starts an antic in any given minute.
+#       Default:     10
+#
+PvPLife.Antics.ChancePerMinute = 10
+
+#
+#   PvPLife.Antics.CooldownSeconds
+#       Description: Seconds a bot waits after one antic before it may start another.
+#       Default:     120
+#
+PvPLife.Antics.CooldownSeconds = 120
+
+#
+#   PvPLife.Antics.Radius
+#       Description: How far (yards, 3-20) a hopping antic strays from where it started. Every step also
+#                    stays within 10 yards of the bot's staging spot, clear of the neighbouring duels.
+#       Default:     6
+#
+PvPLife.Antics.Radius = 6
+
+#
+#   PvPLife.Antics.HopDismount.Chance
+#       Description: Percent of bots riding in to a duel ground that hop and dismount in mid-air instead
+#                    of stopping first (0 = never).
+#       Default:     35
+#
+PvPLife.Antics.HopDismount.Chance = 35
+
+#
+#   PvPLife.Antics.<Antic>.Weight / MinSeconds / MaxSeconds
+#       Description: Per antic: relative odds of being picked (0 = never, at most 1000) and how long it
+#                    lasts, in seconds.
+#       Default:     Weight 20 each; Dance 30-60, Strafe 5-10, HopBackForth 5-10, HopSideToSide 5-10,
+#                    BunnyHop 15-30
+#
+PvPLife.Antics.Dance.Weight = 20
+PvPLife.Antics.Dance.MinSeconds = 30
+PvPLife.Antics.Dance.MaxSeconds = 60
+PvPLife.Antics.Strafe.Weight = 20
+PvPLife.Antics.Strafe.MinSeconds = 5
+PvPLife.Antics.Strafe.MaxSeconds = 10
+PvPLife.Antics.HopBackForth.Weight = 20
+PvPLife.Antics.HopBackForth.MinSeconds = 5
+PvPLife.Antics.HopBackForth.MaxSeconds = 10
+PvPLife.Antics.HopSideToSide.Weight = 20
+PvPLife.Antics.HopSideToSide.MinSeconds = 5
+PvPLife.Antics.HopSideToSide.MaxSeconds = 10
+PvPLife.Antics.BunnyHop.Weight = 20
+PvPLife.Antics.BunnyHop.MinSeconds = 15
+PvPLife.Antics.BunnyHop.MaxSeconds = 30
+
+#
 #   PvPLife.Duel.ChallengeRealPlayers
 #       Description: Allow bots in duel zones to challenge nearby real players of their own faction.
 #                    Never GMs, and never a player who is dead, mounted, on a vehicle or taxi, AFK, DND,

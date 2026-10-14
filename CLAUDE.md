@@ -66,6 +66,12 @@ world thread.
   `Logs/pvplife_audit.log`; world-thread code only enqueues.
 - `src/PvPLifeDuelSelection.h`, `src/PvPLifeDuelRequestPolicy.h`: small pure-logic helpers for duel
   pairing and request rules.
+- `../mod-hearthside-city/src/LifeMotion.h` (City owns it; `PvPLifeMgr.h` includes it by relative
+  path and `#error`s without it, so this module now needs City checked out beside it):
+  `LifeMotion::Launch` is the validated jump/curve move under duel footwork (`FootworkStep`,
+  `FootworkBound` is its `Bound`), and the antic `Routine`s are the idle duel-ground antics
+  (`UpdateAntics` every ~100 ms, `PvPLife.Antics.*`, `.pvplife debug antic <name> <antic>`). Change
+  it in the City repo; it is not copied here.
 
 ## Cross-module integration
 
