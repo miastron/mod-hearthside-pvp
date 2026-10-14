@@ -267,7 +267,6 @@ namespace PvPLife
         _moveQueue.clear();
         EraseDuelSteps([](DuelStep const&) { return true; });
         _engagementQueue.clear();
-        _chatQueue.clear();
 
         // Undo what can be undone in place; nobody is teleported while the world shuts down.
         for (ReleasingParticipant const& rp : _releasingParticipants)
@@ -418,15 +417,11 @@ namespace PvPLife
         _boredMultiplierMin = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.Bored.MultiplierMin", 2), 1, 10);
         _boredMultiplierMax = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.Bored.MultiplierMax", 4), _boredMultiplierMin, 10);
 
-        // 6. Campaigns & Chatter
+        // 6. Campaigns
         _forTheHordeEnable = sConfigMgr->GetOption<bool>("PvPLife.ForTheHorde.Enable", true);
         _forTheAllianceEnable = sConfigMgr->GetOption<bool>("PvPLife.ForTheAlliance.Enable", true);
         _factionCampaignChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.FactionCampaign.ChancePerTick", 12));
         _factionCampaignGlobalCooldown = std::min<uint32>(MaxCooldownSeconds, sConfigMgr->GetOption<uint32>("PvPLife.FactionCampaign.GlobalCooldownSeconds", 3600));
-
-        _botChatEnable = sConfigMgr->GetOption<bool>("PvPLife.BotChat.Enable", false);
-        _botChatYellChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.BotChat.YellChance", 0));
-        _botChatWorldChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.BotChat.WorldChance", 0));
 
         // 7. Reactive Raid Response
         _reactiveEnable = sConfigMgr->GetOption<bool>("PvPLife.ReactiveRaidResponse.Enable", true);
@@ -483,14 +478,6 @@ namespace PvPLife
         _offlineCandidateCache.clear();
         _offlineCandidateRefresh.clear();
         _offlineCandidateQueries.clear();
-        if (!_botChatEnable)
-            _chatQueue.clear();
-        if (_botChatYellChance == 0)
-            _chatQueue.erase(std::remove_if(_chatQueue.begin(), _chatQueue.end(),
-                [](ChatStep const& s) { return s.Channel == ChatChannel::Yell; }), _chatQueue.end());
-        if (_botChatWorldChance == 0)
-            _chatQueue.erase(std::remove_if(_chatQueue.begin(), _chatQueue.end(),
-                [](ChatStep const& s) { return s.Channel == ChatChannel::World; }), _chatQueue.end());
         for (ActiveEvent& event : _activeEvents)
             if ((event.EventZone.Type == ActivityType::Duel && !_duelEnable) ||
                 (event.EventZone.Type == ActivityType::ForTheHorde && !_forTheHordeEnable) ||
@@ -529,7 +516,6 @@ namespace PvPLife
             _moveQueue.clear();
             EraseDuelSteps([](DuelStep const&) { return true; });
             _engagementQueue.clear();
-            _chatQueue.clear();
         }
 
         if (_enable)
@@ -554,12 +540,6 @@ namespace PvPLife
         if (!WorldDatabase.Query("SHOW TABLES LIKE 'pvp\\_life\\_zone'"))
         {
             LOG_ERROR("module", "[PvPLife] Missing WORLD table pvp_life_zone. AzerothCore's updater creates it from "
-                "data/sql/db-world/base/pvp_life.sql: make sure Updates.EnableDatabases includes the world database.");
-            return false;
-        }
-        if (!WorldDatabase.Query("SHOW TABLES LIKE 'pvp\\_life\\_chat'"))
-        {
-            LOG_ERROR("module", "[PvPLife] Missing WORLD table pvp_life_chat. AzerothCore's updater creates it from "
                 "data/sql/db-world/base/pvp_life.sql: make sure Updates.EnableDatabases includes the world database.");
             return false;
         }
@@ -630,7 +610,7 @@ namespace PvPLife
         z.DurationMin = f[21].Get<uint32>(); z.DurationMax = f[22].Get<uint32>();
         z.Weight = f[23].Get<uint32>(); z.CooldownSeconds = f[24].Get<uint32>(); z.LastStart = f[25].Get<uint32>();
         z.ChallengePlayers = f[26].Get<uint8>() != 0;
-        z.BotChat = f[27].Get<uint8>() != 0;
+        // f[27] is bot_chat: still selected so old rows load, but nothing reads it any more.
         // An unknown map id would assert in MapMgr::CreateBaseMap, so check it before GetZoneId.
         bool validMap = sMapStore.LookupEntry(z.MapId) != nullptr;
         if (!validMap || type > uint8(ActivityType::ForTheAlliance) || attackerTeam > uint8(TeamSide::Any) ||
@@ -687,24 +667,6 @@ namespace PvPLife
                     _zoneConfig[zone.Name] = BuildZoneConfig(zone);
                     _zoneCache.push_back(zone);
                 } while (result->NextRow());
-            }));
-        _queryProcessor.AddCallback(WorldDatabase.AsyncQuery(
-            "SELECT activity_type,channel,speaker_team,text,weight FROM pvp_life_chat WHERE enabled=1 ORDER BY id").WithCallback(
-            [this, generation, snapshot](QueryResult result)
-            {
-                if (generation != _dataGeneration || snapshot != _zoneSnapshotGeneration)
-                    return;
-                std::vector<CachedChatLine> lines;
-                if (result)
-                    do
-                    {
-                        Field* fields = result->Fetch();
-                        lines.push_back({ static_cast<ActivityType>(fields[0].Get<uint8>()),
-                            static_cast<ChatChannel>(fields[1].Get<uint8>()),
-                            static_cast<TeamSide>(fields[2].Get<uint8>()), fields[3].Get<std::string>(),
-                            std::max<uint32>(1, fields[4].Get<uint32>()) });
-                    } while (result->NextRow());
-                _chatCache = std::move(lines);
             }));
     }
 
@@ -1029,8 +991,6 @@ namespace PvPLife
         EraseDuelSteps([guidLow](DuelStep const& step) { return step.ChallengerGuidLow == guidLow || step.TargetGuidLow == guidLow; });
         _engagementQueue.erase(std::remove_if(_engagementQueue.begin(), _engagementQueue.end(),
             [guidLow](EngagementStep const& step) { return step.BotGuidLow == guidLow || step.TargetGuidLow == guidLow; }), _engagementQueue.end());
-        _chatQueue.erase(std::remove_if(_chatQueue.begin(), _chatQueue.end(),
-            [guidLow](ChatStep const& step) { return step.SpeakerGuidLow == guidLow; }), _chatQueue.end());
     }
 
     uint8 Manager::EffectiveMinLevel(uint8 minLevel, ActivityType type) const
@@ -1341,11 +1301,9 @@ namespace PvPLife
                 // AutoDoQuests is on and the new one is off) walks it out of the event, whatever the
                 // configured sets say.
                 nonCombatStrats += ",-new rpg,-rpg,-travel";
-                if (!_botChatEnable || _botChatYellChance == 0)
-                {
-                    combatStrats += ",-chat,-emote";
-                    nonCombatStrats += ",-chat,-emote";
-                }
+                // Borrowed bots never speak or emote on their own; speech belongs to mod-hearthside-chat.
+                combatStrats += ",-chat,-emote";
+                nonCombatStrats += ",-chat,-emote";
                 change(combatStrats, BOT_STATE_COMBAT);
                 change(nonCombatStrats, BOT_STATE_NON_COMBAT);
                 if (duelMode)
@@ -2530,8 +2488,6 @@ namespace PvPLife
             event.FullyPrepared = true;
             event.StartedAt = now;
             event.EndsAt = now + event.DurationSeconds;
-            if (event.EventZone.BotChat && _botChatEnable)
-                ScheduleEventChat(event);
             // Announced once the bots are in place, not when admission was only requested.
             if (event.Origin == EventOrigin::Zone)
                 Announce("[World PvP] " + std::string(TypeName(event.EventZone.Type)) + " at " + event.EventZone.Name);
@@ -3076,8 +3032,6 @@ namespace PvPLife
         EraseDuelSteps([guid](DuelStep const& s) { return s.ChallengerGuidLow == guid || s.TargetGuidLow == guid; });
         _engagementQueue.erase(std::remove_if(_engagementQueue.begin(), _engagementQueue.end(),
             [guid](EngagementStep const& s) { return s.BotGuidLow == guid || s.TargetGuidLow == guid; }), _engagementQueue.end());
-        _chatQueue.erase(std::remove_if(_chatQueue.begin(), _chatQueue.end(),
-            [guid](ChatStep const& s) { return s.SpeakerGuidLow == guid; }), _chatQueue.end());
 
         ReleasingParticipant releasing;
         releasing.Part = part;
@@ -3105,8 +3059,6 @@ namespace PvPLife
         EraseDuelSteps([id](DuelStep const& step) { return step.EventId == id; });
         _engagementQueue.erase(std::remove_if(_engagementQueue.begin(), _engagementQueue.end(),
             [id](EngagementStep const& step) { return step.EventId == id; }), _engagementQueue.end());
-        _chatQueue.erase(std::remove_if(_chatQueue.begin(), _chatQueue.end(),
-            [id](ChatStep const& step) { return step.EventId == id; }), _chatQueue.end());
         for (Participant const& part : event.Members)
             QueueParticipantRelease(part, _returnBots);
         // Every staging slot this event claimed carries its id; the duelists are leaving.
@@ -3755,135 +3707,6 @@ namespace PvPLife
                     { return kept.ChallengerGuidLow == step.ChallengerGuidLow && kept.TargetGuidLow == step.TargetGuidLow; }))
                 PlayerbotsLife::ReleaseRealPlayerChallengeClaim(step.TargetGuidLow, step.ChallengeClaimExpiry);
         _duelQueue.swap(keep);
-    }
-
-    std::string Manager::RandomChatLine(ActivityType type, ChatChannel channel, TeamSide speakerTeam)
-    {
-        uint64 total = 0;
-        for (CachedChatLine const& line : _chatCache)
-            if (line.Type == type && line.Channel == channel &&
-                (line.Team == speakerTeam || line.Team == TeamSide::Any))
-                total += line.Weight;
-        if (!total)
-            return {};
-        uint64 roll = static_cast<uint64>(frand(0.0f, 1.0f) * total);
-        roll = std::min(roll, total - 1);
-        for (CachedChatLine const& line : _chatCache)
-            if (line.Type == type && line.Channel == channel &&
-                (line.Team == speakerTeam || line.Team == TeamSide::Any))
-            {
-                if (roll < line.Weight)
-                    return line.Text;
-                roll -= line.Weight;
-            }
-        return {};
-    }
-
-    void Manager::ScheduleEventChat(ActiveEvent const& event)
-    {
-        if (!_botChatEnable || !event.EventZone.BotChat)
-            return;
-        if (_botChatYellChance == 0 && _botChatWorldChance == 0)
-            return;
-        if (event.EventZone.Type != ActivityType::ForTheHorde && event.EventZone.Type != ActivityType::ForTheAlliance)
-            return;
-
-        std::vector<Participant const*> defenders;
-        for (Participant const& p : event.Members)
-            if (!p.Attacker)
-                defenders.push_back(&p);
-        if (defenders.empty())
-            return;
-
-        TeamSide team = event.EventZone.DefenderTeam;
-        uint32 base = _arrivalStaggerMax + 8;
-        if (_botChatYellChance > 0 && urand(1, 100) <= _botChatYellChance)
-        {
-            std::string line = RandomChatLine(event.EventZone.Type, ChatChannel::Yell, team);
-            if (!line.empty())
-            {
-                Participant const* speaker = defenders[urand(0, static_cast<uint32>(defenders.size() - 1))];
-                ChatStep step;
-                step.EventId = event.EventId;
-                step.Generation = speaker->Token.Generation;
-                step.Token = speaker->Token;
-                step.SpeakerGuidLow = speaker->Bot.GuidLow;
-                step.ExecuteAt = GameTimeSeconds() + base + urand(1, 8);
-                step.Channel = ChatChannel::Yell;
-                step.Text = std::move(line);
-                _chatQueue.push_back(step);
-            }
-        }
-        if (_botChatWorldChance > 0 && urand(1, 100) <= _botChatWorldChance)
-        {
-            std::string line = RandomChatLine(event.EventZone.Type, ChatChannel::World, team);
-            if (!line.empty())
-            {
-                Participant const* speaker = defenders[urand(0, static_cast<uint32>(defenders.size() - 1))];
-                ChatStep step;
-                step.EventId = event.EventId;
-                step.Generation = speaker->Token.Generation;
-                step.Token = speaker->Token;
-                step.SpeakerGuidLow = speaker->Bot.GuidLow;
-                step.ExecuteAt = GameTimeSeconds() + base + urand(8, 25);
-                step.Channel = ChatChannel::World;
-                step.Text = std::move(line);
-                _chatQueue.push_back(step);
-            }
-        }
-    }
-
-    void Manager::ProcessChatQueue()
-    {
-        if (!_botChatEnable)
-        {
-            if (!_chatQueue.empty())
-                _chatQueue.clear();
-            return;
-        }
-
-        uint32 now = GameTimeSeconds();
-        std::vector<ChatStep> keep;
-        for (ChatStep const& step : _chatQueue)
-        {
-            if (step.Channel == ChatChannel::Yell && _botChatYellChance == 0)
-                continue;
-            if (step.Channel == ChatChannel::World && _botChatWorldChance == 0)
-                continue;
-
-            auto preparing = std::find_if(_activeEvents.begin(), _activeEvents.end(),
-                [&](ActiveEvent const& event) { return event.EventId == step.EventId; });
-            if (preparing != _activeEvents.end() && !preparing->Closing && !preparing->FullyPrepared &&
-                preparing->PrepareDeadline > now)
-            {
-                keep.push_back(step);
-                continue;
-            }
-            if (step.ExecuteAt > now)
-            {
-                keep.push_back(step);
-                continue;
-            }
-            if (!CanExecuteStep(step.EventId, step.Generation, step.SpeakerGuidLow))
-                continue;
-            Player* speaker = FindPlayer(step.SpeakerGuidLow);
-            if (!speaker)
-                continue;
-            PlayerbotAI* ai = GET_PLAYERBOT_AI(speaker);
-            if (!ai)
-                continue;
-            if (step.Channel == ChatChannel::Yell)
-            {
-                if (_botChatYellChance > 0)
-                    ai->Yell(step.Text);
-            }
-            else
-            {
-                if (_botChatWorldChance > 0)
-                    ai->SayToWorld(step.Text);
-            }
-        }
-        _chatQueue.swap(keep);
     }
 
     void Manager::MaintainBotDuels()
@@ -4721,7 +4544,6 @@ namespace PvPLife
             event.EventZone.Type = ActivityType::Skirmish;
             event.EventZone.AttackerTeam = pending.ResponseTeam;
             event.EventZone.DefenderTeam = invaderTeam;
-            event.EventZone.BotChat = _botChatEnable;
             event.EventZone.TargetX = pending.TargetX;
             event.EventZone.TargetY = pending.TargetY;
             event.EventZone.TargetZ = pending.TargetZ;
@@ -4850,7 +4672,6 @@ namespace PvPLife
         ProcessPendingWalks();
         ProcessDuelQueue();
         ProcessEngagementQueue();
-        ProcessChatQueue();
         if (_duelGuardTimerMs <= diff)
         {
             _duelGuardTimerMs = _duelGuardIntervalMs;
@@ -5079,7 +4900,6 @@ namespace PvPLife
         handler->PSendSysMessage("Pending Moves: {}", _moveQueue.size());
         handler->PSendSysMessage("Pending Duels: {}", _duelQueue.size());
         handler->PSendSysMessage("Pending Engagements: {}", _engagementQueue.size());
-        handler->PSendSysMessage("Pending Chats: {}", _chatQueue.size());
         handler->PSendSysMessage("Pending Raid Responses: {}", _pendingResponses.size());
 
         PlayerbotsLife::CooperationSnapshot snap = PlayerbotsLife::GetCooperationSnapshot();
@@ -5097,7 +4917,7 @@ namespace PvPLife
         handler->PSendSysMessage("{} scan [minLvl] [maxLvl]", cmdPrefix);
         handler->PSendSysMessage("{} start <zone|spot>", cmdPrefix);
         handler->PSendSysMessage("{} stop <id|all>", cmdPrefix);
-        handler->PSendSysMessage("{} reload   (re-checks the tables and re-reads zones and chat lines; .reload config re-reads the conf file)", cmdPrefix);
+        handler->PSendSysMessage("{} reload   (re-checks the tables and re-reads zones; .reload config re-reads the conf file)", cmdPrefix);
         handler->PSendSysMessage("{} compat", cmdPrefix);
         handler->PSendSysMessage("{} reservations", cmdPrefix);
         handler->PSendSysMessage("{} response status | stop <id|all>", cmdPrefix);
@@ -5109,11 +4929,11 @@ namespace PvPLife
         handler->PSendSysMessage("{} zone counts <name> <attMin> <attMax> <defMin> <defMax>", cmdPrefix);
         handler->PSendSysMessage("{} zone duration <name> <minM> <maxM>", cmdPrefix);
         handler->PSendSysMessage("{} zone weight <name> <weight> | cooldown <name> <seconds>", cmdPrefix);
-        handler->PSendSysMessage("{} zone challenge <name> <0|1> | chat <name> <0|1> | enable <name> <0|1>", cmdPrefix);
+        handler->PSendSysMessage("{} zone challenge <name> <0|1> | enable <name> <0|1>", cmdPrefix);
         if (isWpvp)
         {
             handler->PSendSysMessage(".wpvp spot create <name> <attacker> <defender> <minLvl> <maxLvl>   (same faction = duel, else skirmish)");
-            handler->PSendSysMessage(".wpvp spot list | rally | target | counts | duration | weight | cooldown | challenge | chat | enable   (as zone ...)");
+            handler->PSendSysMessage(".wpvp spot list | rally | target | counts | duration | weight | cooldown | challenge | enable   (as zone ...)");
         }
     }
 
@@ -5193,11 +5013,11 @@ namespace PvPLife
             for (Zone& z : zones)
             {
                 ApplyZoneConfig(z);
-                handler->PSendSysMessage("#{} {} [{}] enabled={} {}->{} level={}~{} pop={}~{} ratio={}~{} / {}~{} cooldown={}s challenge={} chat={}",
+                handler->PSendSysMessage("#{} {} [{}] enabled={} {}->{} level={}~{} pop={}~{} ratio={}~{} / {}~{} cooldown={}s challenge={}",
                     z.Id, z.Name, TypeName(z.Type), z.Enabled ? 1 : 0, TeamName(z.AttackerTeam), TeamName(z.DefenderTeam),
                     z.MinLevel, z.MaxLevel, z.PopulationMin, z.PopulationMax,
                     z.AttackersMin, z.AttackersMax, z.DefendersMin, z.DefendersMax,
-                    z.CooldownSeconds, z.ChallengePlayers ? 1 : 0, z.BotChat ? 1 : 0);
+                    z.CooldownSeconds, z.ChallengePlayers ? 1 : 0);
             }
             if (_pendingZoneWrites)
                 handler->PSendSysMessage("({} zone edit(s) still being written; the list refreshes once they commit.)", _pendingZoneWrites);
@@ -5273,7 +5093,7 @@ namespace PvPLife
         }
 
         bool known = action == "rally" || action == "target" || action == "counts" || action == "duration" ||
-            action == "weight" || action == "cooldown" || action == "challenge" || action == "chat" || action == "enable";
+            action == "weight" || action == "cooldown" || action == "challenge" || action == "enable";
         if (!known || args.size() < 3)
         {
             PrintHelp(handler);
@@ -5358,7 +5178,7 @@ namespace PvPLife
             handler->PSendSysMessage("Invalid value parameter.");
             return true;
         }
-        bool flag = action == "challenge" || action == "chat" || action == "enable";
+        bool flag = action == "challenge" || action == "enable";
         if (flag && value > 1)
         {
             handler->PSendSysMessage("Use 0 or 1.");
@@ -5374,8 +5194,6 @@ namespace PvPLife
             report(QueueZoneMutation(Acore::StringFormat("UPDATE pvp_life_zone SET cooldown_seconds={} WHERE name='{}'", value, name)));
         else if (action == "challenge")
             report(QueueZoneMutation(Acore::StringFormat("UPDATE pvp_life_zone SET challenge_players={} WHERE name='{}'", value, name)));
-        else if (action == "chat")
-            report(QueueZoneMutation(Acore::StringFormat("UPDATE pvp_life_zone SET bot_chat={} WHERE name='{}'", value, name)));
         else
         {
             report(QueueZoneMutation(Acore::StringFormat("UPDATE pvp_life_zone SET enabled={} WHERE name='{}'", value, name)));
@@ -5416,7 +5234,7 @@ namespace PvPLife
             return HandleZoneCommand(handler, forwardArgs);
         }
         if (action == "rally" || action == "target" || action == "counts" || action == "duration" ||
-            action == "weight" || action == "cooldown" || action == "challenge" || action == "chat" || action == "enable")
+            action == "weight" || action == "cooldown" || action == "challenge" || action == "enable")
         {
             std::vector<std::string> forwardArgs = args;
             forwardArgs[0] = "zone";
@@ -5545,7 +5363,6 @@ namespace PvPLife
             _moveQueue.clear();
             EraseDuelSteps([](DuelStep const&) { return true; });
             _engagementQueue.clear();
-            _chatQueue.clear();
             if (handler)
                 handler->PSendSysMessage("PvP Life: Stopped all activities.");
             return;
@@ -5618,7 +5435,7 @@ namespace PvPLife
         if (cmd == "reload")
         {
             LoadConfig();
-            handler->PSendSysMessage("PvP Life: Re-applied the loaded configuration; zones and chat lines are being re-read. "
+            handler->PSendSysMessage("PvP Life: Re-applied the loaded configuration; zones are being re-read. "
                 "(.reload config re-reads the conf file itself.)");
             return true;
         }

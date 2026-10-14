@@ -18,12 +18,12 @@ An AzerothCore + mod-playerbots module focused on making the open world feel ali
 - **Reactive Raid Defense:** Automatically detects qualifying outdoor player-led invasion raids (20+ members, PvP-flagged leader, outside their own faction's territory and outside Wintergrasp while its battle is on), staging an opposing faction defense force 120 yards away in rows of 9 lanes at 4-yard spacing before it advances on the raid leader.
 - **Capital Gate Duel Arenas:** Near-continuous bot-vs-bot duel activity outside Stormwind and Orgrimmar gates. This module and `mod-hearthside-city` (City Life) run gate duels concurrently without interference.
 - **Bot-to-Player Duel Challenges:** Bots in duel arenas challenge nearby real players of their own faction with configurable level-difference checks and strict anti-spam cooldowns (shared with City Life). Players who are dead, mounted, on a taxi or vehicle, AFK, DND, trading or in combat are left alone.
-- **For the Horde & For the Alliance Campaigns:** Faction pressure pushes towards enemy capitals with organic defender yells and world chat reactions.
+- **For the Horde & For the Alliance Campaigns:** Faction pressure pushes towards enemy capitals.
 - **Mutual Anti-Stealing Reservation Barrier:** Standalone-safe, thread-safe shared reservation registry (`PlayerbotsLife::ReservationRegistry`) ensuring bots borrowed by City Life are never stolen or commanded by PvP Life, and vice versa.
 - **Conservative Balanced Population Budgets:** Default borrowing budget of 10% / 120 bots max (configured for a 1,000-bot server) guarantees that ≥ 80% (800+ bots) of random bots remain completely free to roam, quest, level, and run dungeons.
 - **Zero Bot Tampering Invariant:** Bots are borrowed strictly AS-IS from the natural Playerbot pool with zero artificial level boosts, zero talent changes, and zero stat inflation.
-- **Zero GM Spam Protection:** Game Masters and administrators are strictly exempt from unsolicited duel challenges, yells, or world announcements.
-- **Silent-by-Default Chatter & Announcements:** All automated bot chatter, yells, and server-wide announcements default to OFF (`0`) in config for a clean, natural player atmosphere.
+- **Zero GM Spam Protection:** Game Masters and administrators are strictly exempt from unsolicited duel challenges or world announcements.
+- **Silent Bots, Quiet Announcements:** Server-wide event announcements default to OFF (`0`) in config. PvP Life no longer has any bot speech: bots it borrows speak only through `mod-hearthside-chat` when that module is installed. Operators who had `PvPLife.BotChat.*` switched on will notice the change (those options and the `pvp_life_chat` table are gone; the base SQL drops the table).
 - **Instant Disengagement on Invite or Logout:** Combatants and duelers immediately drop PvP Life activities if invited to a player group or logged out.
 - **Shared Duel Staging Lattice (20yd Spacing):** Prevents duel area collisions outside Stormwind and Orgrimmar gates when running concurrently with `mod-hearthside-city`.
 - **Asynchronous Non-Blocking Audit Logger:** Dedicated worker thread writing to `Logs/pvplife_audit.log` tracking `CONFIG`, `START`, `END`, `MOVE`, `DUEL_QUEUE`, `DUEL`, `REACTIVE_START` and `ZONE_EDIT` (GM zone edits) records with zero world-thread blocking I/O.
@@ -77,7 +77,7 @@ Both the `.pvplife` and `.wpvp` roots (GM level) take every subcommand below; un
 - `.pvplife scan [minLvl] [maxLvl]` (or `.wpvp scan`): Scans online bot population, faction distribution, and hotspot readiness.
 - `.pvplife compat` (or `.wpvp compat`): Shows detected active Life modules and reservation statistics.
 - `.pvplife reservations`: Breakdown of reserved bots by owning module (`CityLife`, `PvPLife`, `Artisans`).
-- `.pvplife reload`: Re-applies the loaded configuration, re-checks the tables and re-reads zones and chat lines. To pick up edits to the conf file, use `.reload config` (which does all of this too).
+- `.pvplife reload`: Re-applies the loaded configuration, re-checks the tables and re-reads zones. To pick up edits to the conf file, use `.reload config` (which does all of this too).
 - `.pvplife debug [status|validate|bot <guid|name>]`: Internal counters, a table check, or one bot's state.
 
 ### Reactive Defense Management
@@ -95,7 +95,7 @@ Both the `.pvplife` and `.wpvp` roots (GM level) take every subcommand below; un
 - `.pvplife zone counts <name> <attMin> <attMax> <defMin> <defMax>` (or `.wpvp spot counts`): Tunes participant counts.
 - `.pvplife zone duration <name> <minM> <maxM>` (or `.wpvp spot duration`): Tunes event duration.
 - `.pvplife zone weight <name> <weight>` / `zone cooldown <name> <seconds>`: Selection weight (0 = never picked automatically) and restart cooldown.
-- `.pvplife zone challenge <name> <0|1>` / `zone chat <name> <0|1>`: Real-player duel challenges and defender chatter for that zone.
+- `.pvplife zone challenge <name> <0|1>`: Real-player duel challenges for that zone.
 - `.pvplife zone enable <name> <0|1>` (or `.wpvp spot enable`): Enables or disables a hotspot.
 
 A `PvPLife.Zone.<name>.*` key in the conf overrides the stored enabled flag and population, GM edits included; the commands say so when one is set.

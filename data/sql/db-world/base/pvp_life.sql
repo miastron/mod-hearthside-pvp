@@ -1,10 +1,8 @@
--- mod-hearthside-pvp: world database (pvp_life_zone, pvp_life_chat, the .wpvp command row).
+-- mod-hearthside-pvp: world database (pvp_life_zone, the .wpvp command row).
 -- One idempotent file, applied by AzerothCore's updater and re-applied whenever it changes:
 -- tables are created only if missing and no re-apply overwrites what an operator changed. A
 -- hotspot that was edited or disabled keeps its values (seeds are skipped by name); one that was
 -- deleted or renamed comes back on the next re-apply, so disable a seeded hotspot instead.
--- Chat lines are seeded only while a capital-battle activity has none at all, so edited or
--- deleted lines are never re-added.
 -- Folded from the upstream mod-playerbots-pvp-life manual + updates scripts, none of which had
 -- been applied through the updater.
 
@@ -42,17 +40,8 @@ CREATE TABLE IF NOT EXISTS `pvp_life_zone` (
   KEY `idx_pvp_life_zone_activity` (`enabled`,`activity_type`,`last_start`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `pvp_life_chat` (
-  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `enabled` TINYINT UNSIGNED NOT NULL DEFAULT 1,
-  `activity_type` TINYINT UNSIGNED NOT NULL COMMENT '2=ForTheHorde,3=ForTheAlliance',
-  `channel` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0=Yell,1=World',
-  `speaker_team` TINYINT UNSIGNED NOT NULL DEFAULT 2 COMMENT '0=Alliance,1=Horde,2=Any',
-  `text` VARCHAR(255) NOT NULL,
-  `weight` INT UNSIGNED NOT NULL DEFAULT 100,
-  PRIMARY KEY (`id`),
-  KEY `idx_pvp_life_chat_pick` (`enabled`,`activity_type`,`channel`,`speaker_team`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- Bot speech was removed from PvP Life; the chat-line table it used is dropped.
+DROP TABLE IF EXISTS `pvp_life_chat`;
 
 -- Seed data for PvP Life zones (idempotent insert)
 INSERT IGNORE INTO `pvp_life_zone`
@@ -139,35 +128,6 @@ UPDATE `pvp_life_zone` SET `attackers_min`=3,`attackers_max`=7,`defenders_min`=3
   WHERE `name`='ForTheHorde_Stormwind' AND `attackers_min`=6 AND `attackers_max`=14 AND `defenders_min`=6 AND `defenders_max`=14;
 UPDATE `pvp_life_zone` SET `attackers_min`=3,`attackers_max`=7,`defenders_min`=3,`defenders_max`=7
   WHERE `name`='ForTheAlliance_Orgrimmar' AND `attackers_min`=6 AND `attackers_max`=14 AND `defenders_min`=6 AND `defenders_max`=14;
-
--- Seed chatter for faction capital battles: only for an activity type that has no lines yet.
-INSERT INTO `pvp_life_chat` (`enabled`,`activity_type`,`channel`,`speaker_team`,`text`,`weight`)
-SELECT * FROM (
-  -- For the Horde: Alliance defenders reacting.
-  SELECT 1 AS enabled, 2 AS activity_type, 0 AS channel, 0 AS speaker_team, 'Horde in Stormwind!' AS text, 100 AS weight UNION ALL
-  SELECT 1, 2, 0, 0, 'Horde at the gates!', 80 UNION ALL
-  SELECT 1, 2, 0, 0, 'Defend Stormwind!', 80 UNION ALL
-  SELECT 1, 2, 0, 0, 'Horde in SW!', 100 UNION ALL
-  SELECT 1, 2, 1, 0, 'horde in sw', 120 UNION ALL
-  SELECT 1, 2, 1, 0, 'horde at sw gates', 90 UNION ALL
-  SELECT 1, 2, 1, 0, 'need help sw', 100 UNION ALL
-  SELECT 1, 2, 1, 0, 'horde raid sw go def', 75 UNION ALL
-  SELECT 1, 2, 1, 0, 'horde in stormwind', 90 UNION ALL
-  -- For the Alliance: Horde defenders reacting.
-  SELECT 1, 3, 0, 1, 'Alliance in Orgrimmar!', 100 UNION ALL
-  SELECT 1, 3, 0, 1, 'Alliance at the gates!', 80 UNION ALL
-  SELECT 1, 3, 0, 1, 'Defend Orgrimmar!', 80 UNION ALL
-  SELECT 1, 3, 0, 1, 'Alliance in Org!', 100 UNION ALL
-  SELECT 1, 3, 1, 1, 'ally in org', 120 UNION ALL
-  SELECT 1, 3, 1, 1, 'alliance in org', 90 UNION ALL
-  SELECT 1, 3, 1, 1, 'need help org', 100 UNION ALL
-  SELECT 1, 3, 1, 1, 'ally raid org go def', 75 UNION ALL
-  SELECT 1, 3, 1, 1, 'alliance at org gates', 90
-) AS tmp
-WHERE NOT EXISTS (
-  SELECT 1 FROM `pvp_life_chat` c
-  WHERE c.activity_type = tmp.activity_type
-);
 
 -- GM command help for the legacy .wpvp root. Only `wpvp` itself is a registered command (its
 -- subcommands are parsed by the module), so the core skips any `wpvp ...` row with an error on

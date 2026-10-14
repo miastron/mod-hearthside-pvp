@@ -32,8 +32,9 @@ in place rather than adding dated update files. `data/sql/manual/` holds only th
 `playerbot_world_pvp_hotspot` import.
 
 Tables: `pvp_life_zone` (hotspots; `activity_type` 0=Skirmish 1=Duel 2=ForTheHorde 3=ForTheAlliance,
-teams 0=Alliance 1=Horde 2=Any) and `pvp_life_chat`. `Manager::VerifyDatabase()` disables the module
-if either is missing. Runtime zone edits from GM commands go through async queries
+teams 0=Alliance 1=Horde 2=Any; `bot_chat` is selected but unread, a leftover column). The old
+`pvp_life_chat` table is dropped by the base SQL. `Manager::VerifyDatabase()` disables the module
+if `pvp_life_zone` is missing. Runtime zone edits from GM commands go through async queries
 (`QueueZoneMutation`, `_queryProcessor`/`_transactionProcessor`); don't add blocking DB calls on the
 world thread.
 
@@ -45,7 +46,7 @@ world thread.
   aliases from `mod-playerbots-world-pvp`).
 - `src/PvPLifeMgr.{h,cpp}`: `PvPLife::Manager` (`sPvPLifeMgr`) holds nearly all logic and state in
   one ~4k-line file. `Manager::Update` runs every world tick: async callbacks, admission grants,
-  then per-tick work queues (`_moveQueue`, `_duelQueue`, `_engagementQueue`, `_chatQueue`) and,
+  then per-tick work queues (`_moveQueue`, `_duelQueue`, `_engagementQueue`) and,
   every `_tickSeconds`, the management pass (start/expire events, reactive raid detection, duel
   maintenance, real-player challenges). Bots are released through a phased
   `_releasingParticipants` queue that runs even while disabled or reloading, restoring what the
@@ -102,8 +103,10 @@ world thread.
 - **Busy marks:** Chat marks the bots it casts in a /say scene (`LifeActivity`). `Manager::Talking`
   keeps such a bot out of duel and real-player-challenge picks, antics and fidgets
   (`MaintainDuelParticipants`) and the linger release (`DuelIdle`) until the scene ends.
-- Bots are borrowed as-is (no level, talent or gear changes), GMs are never challenged or yelled at,
-  and all chatter and announcements default to off in config. Preserve these invariants.
+- Bots are borrowed as-is (no level, talent or gear changes), GMs are never challenged,
+  and announcements default to off in config. Preserve these invariants.
+- No bot speech here: no yells, world-channel lines or chat table. `ApplyPvpStrategies` always adds
+  `-chat,-emote` to borrowed bots; speech is only mod-hearthside-chat's. Don't reintroduce it.
 
 ## Config
 

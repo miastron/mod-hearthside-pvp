@@ -32,12 +32,6 @@ namespace PvPLife
         ForTheAlliance = 3
     };
 
-    enum class ChatChannel : uint8
-    {
-        Yell = 0,
-        World = 1
-    };
-
     enum class EventOrigin : uint8
     {
         Zone = 0,
@@ -82,7 +76,6 @@ namespace PvPLife
         uint32 CooldownSeconds = 900;
         uint32 LastStart = 0;
         bool ChallengePlayers = false;
-        bool BotChat = false;
     };
 
     struct BotCandidate
@@ -203,17 +196,6 @@ namespace PvPLife
         // Expiry of the shared real-player challenge claim taken for this step (0 = none). Handed
         // back if the step is dropped before the challenge is sent.
         uint32 ChallengeClaimExpiry = 0;
-    };
-
-    struct ChatStep
-    {
-        uint64 EventId = 0;
-        uint64 Generation = 0;
-        PlayerbotsLife::LeaseToken Token;
-        uint32 SpeakerGuidLow = 0;
-        uint32 ExecuteAt = 0;
-        ChatChannel Channel = ChatChannel::Yell;
-        std::string Text;
     };
 
     enum class ResponseState : uint8

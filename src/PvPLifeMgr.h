@@ -136,7 +136,6 @@ namespace PvPLife
         bool IsChallengeableRealPlayer(Player* target, Player* bot) const;
         void ScheduleEngagement(uint64 eventId, PlayerbotsLife::LeaseToken const& botToken,
             uint32 botGuid, uint32 targetGuid, uint32 delaySeconds);
-        void ScheduleEventChat(ActiveEvent const& event);
 
         bool CanExecuteStep(uint64 eventId, uint64 generation, uint32 guidLow, bool allowPreparing = false) const;
         bool IsHumanControlled(Player* player) const;
@@ -155,7 +154,6 @@ namespace PvPLife
         void ProcessMoveQueue();
         void ProcessDuelQueue();
         void ProcessEngagementQueue();
-        void ProcessChatQueue();
         void ProcessRealPlayerChallenges();
         void MaintainDuelParticipants();
         // Role matchups for bot duels (PvPLife.Duel.Matchup.*): DPS vs DPS always, a healer rarely,
@@ -277,7 +275,6 @@ namespace PvPLife
         void RollBoredom(uint32 guidLow);
 
         void AuditLog(std::string const& tag, std::string const& text) const;
-        std::string RandomChatLine(ActivityType type, ChatChannel channel, TeamSide speakerTeam);
         void Announce(std::string const& text) const;
         void PrintStatus(ChatHandler* handler) const;
         void PrintScan(ChatHandler* handler, uint8 minLevel, uint8 maxLevel);
@@ -415,15 +412,12 @@ namespace PvPLife
         };
         std::unordered_map<uint32, FidgetState> _idleFidget;
 
-        // Campaigns & chatter
+        // Campaigns
         bool _forTheHordeEnable = true;
         bool _forTheAllianceEnable = true;
         uint32 _factionCampaignChance = 12;
         uint32 _factionCampaignGlobalCooldown = 3600;
         uint32 _lastFactionCampaign = 0;
-        bool _botChatEnable = false;
-        uint32 _botChatYellChance = 0;
-        uint32 _botChatWorldChance = 0;
 
         // Reactive Raid Response
         bool _reactiveEnable = true;
@@ -485,7 +479,6 @@ namespace PvPLife
         std::unordered_map<uint32, Position> _idleReturnPoint;
         std::vector<DuelStep> _duelQueue;
         std::vector<EngagementStep> _engagementQueue;
-        std::vector<ChatStep> _chatQueue;
         std::unordered_map<uint32, uint32> _playerChallengeCooldown;
         std::unordered_map<uint32, uint32> _botChallengeCooldown;
         std::unordered_map<uint32, uint32> _botDuelCooldown;
@@ -497,15 +490,6 @@ namespace PvPLife
         uint64 _dataGeneration = 0;
         uint64 _zoneSnapshotGeneration = 0;
         std::vector<Zone> _zoneCache;
-        struct CachedChatLine
-        {
-            ActivityType Type;
-            ChatChannel Channel;
-            TeamSide Team;
-            std::string Text;
-            uint32 Weight;
-        };
-        std::vector<CachedChatLine> _chatCache;
         std::unordered_map<uint16, std::vector<BotCandidate>> _offlineCandidateCache; // keyed by OfflineCacheKey
         std::unordered_map<uint16, uint32> _offlineCandidateRefresh;
         std::unordered_set<uint16> _offlineCandidateQueries;
