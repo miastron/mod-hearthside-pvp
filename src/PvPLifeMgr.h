@@ -174,6 +174,13 @@ namespace PvPLife
         bool TryStartAntic(Player* bot, uint32 guidLow, LifeMotion::Antic kind = LifeMotion::Antic::None);
         void StopAntic(uint32 guidLow);
         bool AnticRunning(uint32 guidLow) const;
+        // Between bouts an idle duelist now and then strolls to another spot in its home area or turns
+        // to watch a fight, its partner, a real player or nothing much (PvPLife.Duel.IdleFidget.*), so
+        // the pairs do not stand frozen face to face. True if it did something.
+        bool IdleFidget(Player* bot, Participant const& participant, ActiveEvent const& event,
+            std::vector<Player*> const& fighting);
+        // A fidget stroll still under way.
+        bool FidgetWalking(uint32 guidLow, Player* bot) const;
         // A deployed, leased member of a prepared duel-zone event, or null.
         Participant const* FindDuelGroundParticipant(uint32 guidLow) const;
         struct FootworkCheck
@@ -309,6 +316,15 @@ namespace PvPLife
         std::unordered_map<uint32, LifeMotion::Routine> _anticRoutines; // idle entries keep the cooldown
         std::unordered_set<uint32> _hopDismountRolled; // riders already rolled for a mid-air dismount
         uint32 _anticTimerMs = 0;
+        bool _idleFidgetEnable = true;
+        uint32 _idleFidgetMinSeconds = 6;
+        uint32 _idleFidgetMaxSeconds = 20;
+        struct FidgetState
+        {
+            uint64 NextMs = 0;
+            uint64 WalkUntilMs = 0;
+        };
+        std::unordered_map<uint32, FidgetState> _idleFidget;
         std::unordered_set<std::string> _levelExcludeNamesAdded;
 
         // Campaigns & chatter

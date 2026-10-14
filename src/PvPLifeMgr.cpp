@@ -395,6 +395,9 @@ namespace PvPLife
         _footworkIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMaxMs", 2500), _footworkIntervalMinMs, 60000);
         _footworkJumpChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.JumpChance", 35));
         _footworkTrace = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Trace", false);
+        _idleFidgetEnable = sConfigMgr->GetOption<bool>("PvPLife.Duel.IdleFidget.Enable", true);
+        _idleFidgetMinSeconds = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.IdleFidget.MinSeconds", 6), 2, 600);
+        _idleFidgetMaxSeconds = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.IdleFidget.MaxSeconds", 20), _idleFidgetMinSeconds, 600);
         {
             // Duel grounds pack staging spots 20 yards apart: keep the hopping tighter than City's.
             // Their idle spells between duels are short (about a minute), so the odds per minute are higher.
@@ -2140,6 +2143,92 @@ namespace PvPLife
         return true;
     }
 
+    bool Manager::FidgetWalking(uint32 guidLow, Player* bot) const
+    {
+        auto it = _idleFidget.find(guidLow);
+        return it != _idleFidget.end() && NowMs() < it->second.WalkUntilMs && bot->isMoving();
+    }
+
+    bool Manager::IdleFidget(Player* bot, Participant const& participant, ActiveEvent const& event,
+        std::vector<Player*> const& fighting)
+    {
+        if (!_idleFidgetEnable)
+            return false;
+        uint64 now = NowMs();
+        FidgetState& state = _idleFidget[participant.Bot.GuidLow];
+        uint64 interval = uint64(urand(_idleFidgetMinSeconds, _idleFidgetMaxSeconds)) * 1000;
+        if (!state.NextMs)
+        {
+            // First sight of this bot: start its clock at a random point, so pairs do not move in step.
+            state.NextMs = now + urand(0, uint32(interval));
+            return false;
+        }
+        if (now < state.NextMs)
+            return false;
+        state.NextMs = now + interval;
+
+        uint32 roll = urand(1, 100);
+        if (roll <= 45)
+        {
+            // A stroll to somewhere else in the home area, at walking pace.
+            for (int attempt = 0; attempt < 4; ++attempt)
+            {
+                float angle = frand(0.0f, 2.0f * float(M_PI));
+                float radius = frand(0.0f, DuelHomeAreaRadius);
+                float x = participant.ActivityX + std::cos(angle) * radius;
+                float y = participant.ActivityY + std::sin(angle) * radius;
+                if (bot->GetExactDist2d(x, y) < 1.5f)
+                    continue;
+                LifeMotion::Move move;
+                move.From = bot->GetPosition();
+                move.Angle = std::atan2(y - bot->GetPositionY(), x - bot->GetPositionX());
+                move.Distance = bot->GetExactDist2d(x, y);
+                move.Walk = true;
+                move.MoveStay = true;
+                LifeMotion::Bound bound;
+                bound.HomeX = participant.ActivityX;
+                bound.HomeY = participant.ActivityY;
+                bound.HomeRadius = DuelHomeAreaRadius + 1.0f;
+                LifeMotion::Landing landing;
+                if (LifeMotion::Launch(bot, move, bound, &landing))
+                {
+                    state.WalkUntilMs = now + uint64(std::max(landing.DurationMs, 0)) + 500;
+                    return true;
+                }
+            }
+        }
+
+        // A turn: to watch a duel nearby, to the partner, to a real player close by, or anywhere.
+        WorldObject* face = nullptr;
+        if (roll <= 75 && !fighting.empty())
+        {
+            float best = 30.0f;
+            for (Player* duelist : fighting)
+                if (duelist != bot && bot->IsWithinDistInMap(duelist, best))
+                {
+                    best = bot->GetDistance(duelist);
+                    face = duelist;
+                }
+        }
+        if (!face && roll <= 85)
+            for (Participant const& other : event.Members)
+                if (other.PairId == participant.PairId && other.Bot.GuidLow != participant.Bot.GuidLow)
+                    if (Player* partner = FindPlayer(other.Bot.GuidLow); partner && bot->IsWithinDistInMap(partner, 30.0f))
+                        face = partner;
+        if (!face && roll <= 92)
+            for (auto const& ref : bot->GetMap()->GetPlayers())
+                if (Player* p = ref.GetSource(); p && p != bot && IsHumanPlayer(p) && bot->IsWithinDistInMap(p, 20.0f))
+                {
+                    face = p;
+                    break;
+                }
+        if (face)
+            bot->SetFacingToObject(face);
+        else
+            bot->SetFacingTo(frand(0.0f, 2.0f * float(M_PI)));
+        return true;
+    }
+
     void Manager::KeepDuelStrategies()
     {
         for (ActiveEvent const& event : _activeEvents)
@@ -2387,6 +2476,8 @@ namespace PvPLife
                 it = _anticRoutines.erase(it);
             }
         }
+        for (auto it = _idleFidget.begin(); it != _idleFidget.end();)
+            it = leasedGuids.count(it->first) ? std::next(it) : _idleFidget.erase(it);
         for (auto it = _hopDismountRolled.begin(); it != _hopDismountRolled.end();)
             it = _dismountOnArrival.count(*it) ? std::next(it) : _hopDismountRolled.erase(it);
 
@@ -2925,7 +3016,7 @@ namespace PvPLife
                 // slightly different distance apart, instead of every pair lined up on RallyO.
                 float baseAngle = Position::NormalizeOrientation(zone.RallyO + float(i) * float(M_PI) / 3.0f +
                     frand(-0.35f, 0.35f));
-                float offsetDist = 2.5f + frand(0.0f, 1.2f);
+                float offsetDist = 2.0f + frand(0.0f, 2.5f); // 4 to 9 yards apart
                 float ax = sx - std::cos(baseAngle) * offsetDist;
                 float ay = sy - std::sin(baseAngle) * offsetDist;
                 float az = GroundZ(zone.MapId, ax, ay, sz);
@@ -3933,8 +4024,8 @@ namespace PvPLife
                     continue;
                 }
 
-                // An antic under way moves the bot itself (UpdateAntics); leave it be until it ends.
-                if (AnticRunning(participant.Bot.GuidLow))
+                // An antic or a fidget stroll under way moves the bot itself; leave it be until it ends.
+                if (AnticRunning(participant.Bot.GuidLow) || FidgetWalking(participant.Bot.GuidLow, bot))
                     continue;
 
                 if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
@@ -3989,6 +4080,9 @@ namespace PvPLife
 
                 // Between bouts, now and then an antic: a dance, a strafe, a few hops (PvPLife.Antics.*).
                 if (!bot->isMoving() && BotActive(bot) && TryStartAntic(bot, participant.Bot.GuidLow))
+                    continue;
+
+                if (!bot->isMoving() && BotActive(bot) && IdleFidget(bot, participant, event, fighting))
                     continue;
 
                 // Watching a duel nearby: now and then applaud, cheer, roar or flex. About 4% a

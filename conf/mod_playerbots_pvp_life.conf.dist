@@ -374,6 +374,19 @@ PvPLife.Duel.LeashRadius = 40
 PvPLife.Duel.GuardIntervalMs = 1000
 
 #
+#   PvPLife.Duel.IdleFidget.Enable / MinSeconds / MaxSeconds
+#       Description: Between bouts an idle duelist now and then strolls to another spot within 6 yards of
+#                    its staging spot, or turns to watch a duel nearby, its partner, a real player close by
+#                    or nowhere in particular, so the pairs do not stand frozen face to face. Each bot acts
+#                    once every MinSeconds to MaxSeconds, only while mod-playerbots has it active (a real
+#                    player nearby).
+#       Default:     1 (Enabled), 6, 20
+#
+PvPLife.Duel.IdleFidget.Enable = 1
+PvPLife.Duel.IdleFidget.MinSeconds = 6
+PvPLife.Duel.IdleFidget.MaxSeconds = 20
+
+#
 #   PvPLife.Footwork.Duels / PvPLife.Footwork.WorldPvP
 #       Description: Make leased bots move like players while fighting a player, by class and spec
 #                    (src/PvPLifeFootwork.h, from docs/duel-tactics-3.3.5a.md). Casters stand and cast and
