@@ -8,7 +8,7 @@
 #include "PvPLifeDuelSelection.h"
 #include "PvPLifeDuelRequestPolicy.h"
 #include "PvPLifeFootwork.h"
-#include "PvPLifeAudit.h"
+#include "../../mod-hearthside-city/src/LifeArrival.h"
 #include "LifeBotReservation.h"
 
 #include "AiFactory.h"
@@ -52,15 +52,6 @@
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include "WorldSessionMgr.h"
-
-
-// Archetype filter: mod-hearthside-chat's GUID-fixed personality decides which
-// bots this module may borrow (PvPLife.Bots.Archetypes). Without that module in the
-// build every archetype fits.
-#if __has_include("hs_archetype.h")
-#include "hs_archetype.h"
-#define PVPLIFE_HAS_ARCHETYPES 1
-#endif
 
 #include <algorithm>
 #include <cctype>
@@ -223,36 +214,18 @@ namespace
         player->GetSession()->HandleDuelCancelledOpcode(packet);
     }
 
-    // The "+name"/"-name" changes that turn one strategy set into another.
-    std::vector<std::string> StrategyDelta(std::vector<std::string> const& before, std::vector<std::string> const& after)
-    {
-        std::vector<std::string> changes;
-        for (std::string const& name : after)
-            if (std::find(before.begin(), before.end(), name) == before.end())
-                changes.push_back("+" + name);
-        for (std::string const& name : before)
-            if (std::find(after.begin(), after.end(), name) == after.end())
-                changes.push_back("-" + name);
-        return changes;
-    }
 }
 
 namespace PvPLife
 {
     bool IsBotSession(Player const* player)
     {
-        if (!player || !player->GetSession())
-            return false;
-        uint32 accountId = player->GetSession()->GetAccountId();
-        return accountId && (sPlayerbotAIConfig.IsInRandomAccountList(accountId) ||
-                             sRandomPlayerbotMgr.IsAddclassBot(player->GetGUID().GetCounter()) ||
-                             sPvPLifeMgr.IsConfiguredBotAccount(accountId));
+        return LifeBots::IsBotSession(player, sPvPLifeMgr.Accounts());
     }
 
     bool IsHumanPlayer(Player const* player)
     {
-        return player && player->GetSession() && !IsBotSession(player) &&
-            !GET_PLAYERBOT_AI(const_cast<Player*>(player));
+        return LifeBots::IsHumanPlayer(player, sPvPLifeMgr.Accounts());
     }
 
     template <class Pred>
@@ -304,6 +277,7 @@ namespace PvPLife
 
         // Backstop for anything the bookkeeping above no longer knows about.
         PlayerbotsLife::ReleaseAllForOwner(PlayerbotsLife::ReservationOwner::PvPLife);
+        LifeBots::HoldLevels(PlayerbotsLife::ReservationOwner::PvPLife, {});
 
         sPvPLifeAudit.Shutdown();
     }
@@ -332,14 +306,12 @@ namespace PvPLife
         _botAccountPrefix = sConfigMgr->GetOption<std::string>("PvPLife.Bots.AccountPrefix", "auto");
         _botAccountMin = sConfigMgr->GetOption<uint32>("PvPLife.Bots.AccountMin", 0);
         _botAccountMax = sConfigMgr->GetOption<uint32>("PvPLife.Bots.AccountMax", 0);
-        std::string filterModeStr = Lower(sConfigMgr->GetOption<std::string>("PvPLife.Bots.AccountFilterMode", "legacy_any"));
-        _accountFilterMode = (filterModeStr == "all") ? AccountFilterMode::All : AccountFilterMode::LegacyAny;
+        _accountsRequireBoth = Lower(sConfigMgr->GetOption<std::string>("PvPLife.Bots.AccountFilterMode", "legacy_any")) == "all";
 
         _botQueryLimit = sConfigMgr->GetOption<uint32>("PvPLife.Bots.QueryLimit", 500);
         if (_botQueryLimit)
             _botQueryLimit = std::clamp<uint32>(_botQueryLimit, 50, 5000);
-        _archetypes = sConfigMgr->GetOption<std::string>("PvPLife.Bots.Archetypes",
-            "PVP_SERIOUS,PVP_CASUAL,TROLL_MILD,TROLL_AGGRESSIVE");
+        _archetypeFilter.Load("PvPLife.Bots.Archetypes", "PvPLife", "PVP_SERIOUS,PVP_CASUAL,TROLL_MILD,TROLL_AGGRESSIVE");
         _minOnlineRequired = sConfigMgr->GetOption<uint32>("PvPLife.Bots.MinOnlineRequired", 3);
         _globalMinLevel = static_cast<uint8>(std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Bots.GlobalMinLevel", 20), 1, 80));
 
@@ -349,7 +321,9 @@ namespace PvPLife
         _minimumBotsPerSide = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Bots.MinimumPerSide", 1), 1, 10);
         _maxBotsPerSide = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Bots.MaxPerSide", 100), 1, 200);
         _minimumBotsPerSide = std::min(_minimumBotsPerSide, _maxBotsPerSide);
-        _returnBots = sConfigMgr->GetOption<bool>("PvPLife.Bots.ReturnAfterActivity", true);
+        // ReturnAfterActivity is the old name, still read when the new one is not set.
+        _returnBots = sConfigMgr->GetOption<bool>("PvPLife.Bots.ReturnWhenReleased",
+            sConfigMgr->GetOption<bool>("PvPLife.Bots.ReturnAfterActivity", true, false), false);
 
         // 3. Movement & Combat
         _teleportOnArrival = sConfigMgr->GetOption<bool>("PvPLife.Movement.TeleportOnArrival", true);
@@ -477,8 +451,8 @@ namespace PvPLife
 
         // 8. Population Borrowing Budget
         _populationBudgetEnable = sConfigMgr->GetOption<bool>("PvPLife.Population.Enable", true);
-        std::string budgetModeStr = Lower(sConfigMgr->GetOption<std::string>("PvPLife.Population.BudgetMode", "percentage"));
-        _budgetMode = (budgetModeStr == "fixed") ? BudgetMode::Fixed : BudgetMode::Percentage;
+        _budgetPercentage = LifeBots::ParsePercentageBudget(
+            sConfigMgr->GetOption<std::string>("PvPLife.Population.BudgetMode", "percentage"));
         _fixedCount = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Population.FixedCount", 100), 2, 500);
         _borrowPercent = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Population.BorrowPercent", 10), 1, 100);
         _maxTotal = sConfigMgr->GetOption<uint32>("PvPLife.Population.MaxTotal", 120);
@@ -500,29 +474,12 @@ namespace PvPLife
         if (_duelPairDelayMax < _duelPairDelayMin)
             _duelPairDelayMax = _duelPairDelayMin;
 
-        ImportPlayerbotDefaults();
+        LifeBots::ImportPlayerbotDefaults(_usePlayerbotConfig, _botAccountPrefix, _startupDelaySeconds);
         _startupDelaySeconds = std::min<uint32>(3600, _startupDelaySeconds);
+        _accounts.Configure(_botAccountPrefix, _botAccountMin, _botAccountMax, _accountsRequireBoth);
 
-        // Archetype filter, parsed on every load so a bad value is reported every time. A list
-        // that names no known archetype fails closed: no bot fits until it is fixed.
-#ifdef PVPLIFE_HAS_ARCHETYPES
-        _archetypeMask = 0;
-        if (!_archetypes.empty())
-        {
-            std::vector<std::string> unknown;
-            _archetypeMask = Hs_ArchetypeMaskForNames(_archetypes, unknown);
-            for (std::string const& name : unknown)
-                LOG_ERROR("module", "[PvPLife] PvPLife.Bots.Archetypes: unknown archetype '{}', ignored.", name);
-            if (!_archetypeMask)
-                LOG_ERROR("module", "[PvPLife] PvPLife.Bots.Archetypes '{}' names no known archetype: no bot will be borrowed until it is fixed or emptied.", _archetypes);
-        }
-#else
-        if (!_archetypes.empty())
-            LOG_WARN("module", "[PvPLife] PvPLife.Bots.Archetypes is set but mod-hearthside-chat (hs_archetype.h) is not in this build; the filter is ignored.");
-#endif
 
-        _botAccountCache.clear();
-        RefreshAccountCache();
+        RefreshAccountCache(); // keeps the previous answers until the new result arrives
         _offlineCandidateCache.clear();
         _offlineCandidateRefresh.clear();
         _offlineCandidateQueries.clear();
@@ -589,28 +546,6 @@ namespace PvPLife
         AuditLog("CONFIG", "enabled=" + std::to_string(_enable ? 1 : 0) + " prefix=" + _botAccountPrefix +
             " globalMin=" + std::to_string(_globalMinLevel) + " budgetPercent=" + std::to_string(_borrowPercent) +
             " reactive=" + std::to_string(_reactiveEnable ? 1 : 0));
-    }
-
-    void Manager::ImportPlayerbotDefaults()
-    {
-        std::string lowered = Lower(_botAccountPrefix);
-        bool autoPrefix = lowered.empty() || lowered == "auto" || lowered == "playerbot" || lowered == "playerbots";
-        if (!_usePlayerbotConfig)
-        {
-            // Nothing to import "auto" from: match no prefix rather than accounts literally named
-            // "auto...". Random bots still qualify through mod-playerbots' own account list.
-            if (autoPrefix)
-                _botAccountPrefix.clear();
-            return;
-        }
-
-        std::string configuredPrefix = sConfigMgr->GetOption<std::string>("Playerbots.RandomBotAccountPrefix",
-            sConfigMgr->GetOption<std::string>("AiPlayerbot.RandomBotAccountPrefix", "rndbot", false), false);
-        uint32 loginDelay = sConfigMgr->GetOption<uint32>("Playerbots.DisabledWithoutRealPlayerLoginDelay",
-            sConfigMgr->GetOption<uint32>("AiPlayerbot.DisabledWithoutRealPlayerLoginDelay", 30, false), false);
-        if (autoPrefix)
-            _botAccountPrefix = configuredPrefix;
-        _startupDelaySeconds = std::max(_startupDelaySeconds, loginDelay);
     }
 
     bool Manager::VerifyDatabase()
@@ -843,38 +778,18 @@ namespace PvPLife
 
     void Manager::RefreshAccountCache()
     {
-        std::string prefix = Lower(_botAccountPrefix);
-        LoginDatabase.EscapeString(prefix);
-        std::string sql = Acore::StringFormat(
-            "SELECT id,username FROM account WHERE ({} > 0 AND id BETWEEN {} AND {}) OR "
-            "({} > 0 AND LEFT(LOWER(username),{})='{}')",
-            _botAccountMax, _botAccountMin, _botAccountMax, _botAccountPrefix.size(), _botAccountPrefix.size(), prefix);
         uint64 generation = _dataGeneration;
-        _queryProcessor.AddCallback(LoginDatabase.AsyncQuery(sql).WithCallback([this, generation](QueryResult result)
-        {
-            if (generation != _dataGeneration || !result)
-                return;
-            do
+        _queryProcessor.AddCallback(LoginDatabase.AsyncQuery(_accounts.RefreshQuery()).WithCallback(
+            [this, generation](QueryResult result)
             {
-                uint32 id = result->Fetch()[0].Get<uint32>();
-                bool range = _botAccountMax > 0 && id >= _botAccountMin && id <= _botAccountMax;
-                bool prefixMatch = !_botAccountPrefix.empty() &&
-                    Lower(result->Fetch()[1].Get<std::string>()).rfind(Lower(_botAccountPrefix), 0) == 0;
-                bool all = _accountFilterMode == AccountFilterMode::All &&
-                    _botAccountMax > 0 && !_botAccountPrefix.empty();
-                _botAccountCache[id] = all ? range && prefixMatch : range || prefixMatch;
-            } while (result->NextRow());
-        }));
+                if (generation == _dataGeneration)
+                    _accounts.ApplyRefresh(result);
+            }));
     }
 
     bool Manager::IsConfiguredBotAccount(uint32 accountId) const
     {
-        auto cached = _botAccountCache.find(accountId);
-        if (cached != _botAccountCache.end())
-            return cached->second;
-        bool range = accountId && _botAccountMax > 0 && _botAccountMax >= _botAccountMin &&
-            accountId >= _botAccountMin && accountId <= _botAccountMax;
-        return range && !(_accountFilterMode == AccountFilterMode::All && !_botAccountPrefix.empty());
+        return _accounts.IsBotAccount(accountId);
     }
 
     bool Manager::IsSafeBot(Player* player, bool allowPvPLifeReservation) const
@@ -968,33 +883,9 @@ namespace PvPLife
             DisengageParticipant(guidLow);
     }
 
-    void Manager::CaptureAIState(Player* player, AIStateJournal& journal) const
+    void Manager::RestoreAIState(Player* player, LifeBots::StrategyJournal const& journal) const
     {
-        if (!player || journal.Captured)
-            return;
-
-        journal.OriginalPvPFlag = player->IsPvP();
-        if (PlayerbotAI* ai = GET_PLAYERBOT_AI(player))
-        {
-            journal.CombatStrategies = ai->GetStrategies(BOT_STATE_COMBAT);
-            journal.NonCombatStrategies = ai->GetStrategies(BOT_STATE_NON_COMBAT);
-            PositionMap& positions = ai->GetAiObjectContext()->GetValue<PositionMap&>("position")->Get();
-            auto stay = positions.find("stay");
-            journal.HadStayPosition = stay != positions.end() && stay->second.isSet();
-            if (journal.HadStayPosition)
-            {
-                journal.StayX = stay->second.x;
-                journal.StayY = stay->second.y;
-                journal.StayZ = stay->second.z;
-                journal.StayMapId = stay->second.mapId;
-            }
-        }
-        journal.Captured = true;
-    }
-
-    void Manager::RestoreAIState(Player* player, AIStateJournal const& journal) const
-    {
-        if (!player || !journal.Captured || IsHumanControlled(player))
+        if (!player || !journal.Captured() || IsHumanControlled(player))
             return;
 
         // A real player's group takes the bot over: mod-playerbots' AcceptInvitationAction resets
@@ -1011,23 +902,7 @@ namespace PvPLife
         if (player->InBattleground())
             return;
 
-        if (player->IsPvP() == journal.AppliedPvPFlag && player->IsPvP() != journal.OriginalPvPFlag)
-            player->SetPvP(journal.OriginalPvPFlag);
-
-        if (PlayerbotAI* ai = GET_PLAYERBOT_AI(player))
-        {
-            // Reverse exactly the changes we made; anything else that changed meanwhile stays.
-            for (std::string const& change : journal.AppliedCombatChanges)
-                ai->ChangeStrategy((change[0] == '+' ? "-" : "+") + change.substr(1), BOT_STATE_COMBAT);
-            for (std::string const& change : journal.AppliedNonCombatChanges)
-                ai->ChangeStrategy((change[0] == '+' ? "-" : "+") + change.substr(1), BOT_STATE_NON_COMBAT);
-
-            PositionMap& positions = ai->GetAiObjectContext()->GetValue<PositionMap&>("position")->Get();
-            if (journal.HadStayPosition)
-                positions["stay"].Set(journal.StayX, journal.StayY, journal.StayZ, journal.StayMapId);
-            else if (auto stay = positions.find("stay"); stay != positions.end())
-                stay->second.Reset();
-        }
+        LifeBots::Restore(player, journal);
     }
 
     void Manager::CloseNativeDuel(Player* player, Participant const& part) const
@@ -1064,16 +939,7 @@ namespace PvPLife
 
     bool Manager::IsHumanControlled(Player* player) const
     {
-        if (!player || !player->GetSession())
-            return true;
-        PlayerbotAI* ai = GET_PLAYERBOT_AI(player);
-        if (!ai || ::IsRealPlayer(player) || ::IsSelfBot(player) || ai->HasGameClientMaster())
-            return true;
-        if (Group* group = player->GetGroup())
-            for (GroupReference const* ref = group->GetFirstMember(); ref; ref = ref->next())
-                if (Player* member = ref->GetSource(); member && (::IsRealPlayer(member) || ::IsSelfBot(member)))
-                    return true;
-        return false;
+        return LifeBots::IsHumanControlled(player, _accounts);
     }
 
     bool Manager::IsOwnedActor(Player* player, Participant const& part, uint64 eventId) const
@@ -1173,22 +1039,6 @@ namespace PvPLife
             return static_cast<uint8>(std::clamp<uint32>(minLevel, 1, 80));
         uint32 effective = std::max<uint32>(minLevel, _globalMinLevel);
         return static_cast<uint8>(std::min<uint32>(effective, 80));
-    }
-
-    bool Manager::FitsArchetype(uint32 guidLow)
-    {
-#ifdef PVPLIFE_HAS_ARCHETYPES
-        if (_archetypes.empty())
-            return true;
-        if (!_archetypeMask)
-            return false; // a list naming no known archetype fails closed (LoadConfig logs it)
-        uint64 raw = ObjectGuid::Create<HighGuid::Player>(guidLow).GetRawValue();
-        uint32 archetype = static_cast<uint32>(Hs_ArchetypeForBot(raw));
-        return archetype < 32 && (_archetypeMask & (1u << archetype)) != 0;
-#else
-        (void)guidLow;
-        return true;
-#endif
     }
 
     std::vector<BotCandidate> Manager::LoadCandidates(TeamSide team, uint8 minLevel, uint8 maxLevel,
@@ -1330,68 +1180,14 @@ namespace PvPLife
         uint32 now = GameTimeMS();
         if (_lastCensusTimeMs && now - _lastCensusTimeMs < 5000)
             return _cachedLiveBotCount;
-        uint32 count = 0;
-        std::shared_lock<std::shared_mutex> playerLock(*HashMapHolder<Player>::GetLock());
-        for (auto const& entry : ObjectAccessor::GetPlayers())
-        {
-            Player* player = entry.second;
-            if (!player || !player->GetSession() || !player->IsInWorld())
-                continue;
-            if (IsHumanControlled(player) || !player->IsAlive() || player->InBattleground() ||
-                player->InBattlegroundQueue() || !player->GetMap() || player->GetMap()->Instanceable())
-                continue;
-            if (sRandomPlayerbotMgr.IsRandomBot(player) ||
-                IsConfiguredBotAccount(player->GetSession()->GetAccountId()))
-                ++count;
-        }
         _lastCensusTimeMs = now;
-        _cachedLiveBotCount = count;
-        return count;
+        _cachedLiveBotCount = LifeBots::CountLiveWorldBots(_accounts);
+        return _cachedLiveBotCount;
     }
 
     void Manager::UpdateRealPlayersSnapshot() const
     {
-        uint32 now = GameTimeMS();
-        if (_lastRealPlayerCensusTimeMs && now - _lastRealPlayerCensusTimeMs < 3000)
-            return;
-
-        std::vector<RealPlayerSnapshotEntry> snapshot;
-        {
-            std::shared_lock<std::shared_mutex> playerLock(*HashMapHolder<Player>::GetLock());
-            for (auto const& entry : ObjectAccessor::GetPlayers())
-            {
-                Player* player = entry.second;
-                if (!player || !player->IsInWorld() || !IsHumanPlayer(player))
-                    continue;
-
-                RealPlayerSnapshotEntry rpe;
-                rpe.GuidLow = player->GetGUID().GetCounter();
-                rpe.MapId = player->GetMapId();
-                rpe.ZoneId = player->GetZoneId();
-                rpe.AreaId = player->GetAreaId();
-                rpe.Team = player->GetTeamId() == TEAM_ALLIANCE ? TeamSide::Alliance : TeamSide::Horde;
-                rpe.Level = player->GetLevel();
-                rpe.X = player->GetPositionX();
-                rpe.Y = player->GetPositionY();
-                rpe.Z = player->GetPositionZ();
-                rpe.O = player->GetOrientation();
-                rpe.IsAlive = player->IsAlive();
-                rpe.IsPvP = player->IsPvP();
-                rpe.InCombat = player->IsInCombat();
-                rpe.HasDuel = (player->duel != nullptr);
-                rpe.IsGameMaster = player->IsGameMaster();
-                rpe.HiddenGm = player->IsGameMaster() && !player->isGMVisible();
-                rpe.Security = player->GetSession()->GetSecurity();
-
-                Group* group = player->GetGroup();
-                rpe.IsGroupLeader = (group && group->IsLeader(player->GetGUID()));
-                rpe.GroupMembersCount = group ? group->GetMembersCount() : 0;
-
-                snapshot.push_back(std::move(rpe));
-            }
-        }
-        _lastRealPlayerCensusTimeMs = now;
-        _cachedRealPlayers = std::move(snapshot);
+        _presence.Refresh([](Player const* player) { return IsHumanPlayer(player); });
     }
 
     void Manager::PruneExpiredCooldowns()
@@ -1425,48 +1221,16 @@ namespace PvPLife
     {
         if (!_populationBudgetEnable)
             return _maxTotal > 0 ? _maxTotal : 500;
-
-        uint32 eligiblePool = GetLiveWorldBotCount();
-        if (eligiblePool == 0)
-            return 0;
-
-        uint32 budget = _fixedCount;
-        if (_budgetMode == BudgetMode::Percentage)
-            budget = (eligiblePool * _borrowPercent) / 100;
-
-        uint32 ceiling = (_maxTotal > 0) ? _maxTotal : eligiblePool;
-        uint32 upper = std::min<uint32>(ceiling, eligiblePool);
-        if (upper == 0)
-            return 0;
-
-        return std::clamp<uint32>(budget, 1, upper);
+        return LifeBots::Budget(_budgetPercentage, _fixedCount, _borrowPercent, _maxTotal, GetLiveWorldBotCount());
     }
 
     bool Manager::PlayerPresent(Zone const& zone) const
     {
-        bool checkMap = sPlayerbotAIConfig.BotActiveAloneForceWhenInMap;
-        bool checkZone = sPlayerbotAIConfig.BotActiveAloneForceWhenInZone;
-        float range = float(sPlayerbotAIConfig.BotActiveAloneForceWhenInRadius);
-        uint32 zoneId = 0;
-        if (checkZone)
-            zoneId = zone.ZoneId ? zone.ZoneId :
-                sMapMgr->GetZoneId(PHASEMASK_NORMAL, zone.MapId, zone.RallyX, zone.RallyY, zone.RallyZ);
+        uint32 zoneId = zone.ZoneId;
+        if (!zoneId && sPlayerbotAIConfig.BotActiveAloneForceWhenInZone)
+            zoneId = sMapMgr->GetZoneId(PHASEMASK_NORMAL, zone.MapId, zone.RallyX, zone.RallyY, zone.RallyZ);
         UpdateRealPlayersSnapshot(); // throttled to every 3s
-        for (RealPlayerSnapshotEntry const& player : _cachedRealPlayers)
-        {
-            if (player.MapId != zone.MapId || player.HiddenGm)
-                continue;
-            if (checkMap || (checkZone && zoneId && player.ZoneId == zoneId))
-                return true;
-            if (range > 0.0f)
-            {
-                float dx = player.X - zone.RallyX;
-                float dy = player.Y - zone.RallyY;
-                if (dx * dx + dy * dy < range * range)
-                    return true;
-            }
-        }
-        return false;
+        return _presence.Wakes(zone.MapId, zoneId, { { zone.RallyX, zone.RallyY } });
     }
 
     void Manager::CalculatePopulation(Zone const& zone, uint32& attackerCount, uint32& defenderCount,
@@ -1549,16 +1313,28 @@ namespace PvPLife
         }
     }
 
-    void Manager::ApplyPvpStrategies(Player* player, bool duelMode) const
+    void Manager::ApplyPvpStrategies(Player* player, bool duelMode, LifeBots::StrategyJournal* journal) const
     {
         if (!player)
             return;
         if (_forcePvpFlag)
-            player->SetPvP(true);
+        {
+            if (journal)
+                LifeBots::SetPvP(player, *journal, true);
+            else
+                player->SetPvP(true);
+        }
         if (_strategiesEnable)
         {
             if (PlayerbotAI* ai = GET_PLAYERBOT_AI(player))
             {
+                auto change = [&](std::string const& changes, BotState state)
+                {
+                    if (journal)
+                        LifeBots::ChangeStrategies(ai, *journal, changes, state);
+                    else
+                        ai->ChangeStrategy(changes, state);
+                };
                 std::string combatStrats = _pvpCombatStrategies;
                 std::string nonCombatStrats = duelMode ? _duelNonCombatStrategies : _pvpNonCombatStrategies;
                 // Whichever wandering strategy mod-playerbots gave the bot (new rpg, or rpg when
@@ -1570,13 +1346,13 @@ namespace PvPLife
                     combatStrats += ",-chat,-emote";
                     nonCombatStrats += ",-chat,-emote";
                 }
-                ai->ChangeStrategy(combatStrats, BOT_STATE_COMBAT);
-                ai->ChangeStrategy(nonCombatStrats, BOT_STATE_NON_COMBAT);
+                change(combatStrats, BOT_STATE_COMBAT);
+                change(nonCombatStrats, BOT_STATE_NON_COMBAT);
                 if (duelMode)
                     // -mount: mod-playerbots remounts an idle bot, and the 3-second duel countdown is
                     // idle, so a duelist dismounted for the challenge got back on just to be pulled off
                     // again when the duel began (realm 2026-10-13).
-                    ai->ChangeStrategy("+stay,-follow,-passive,-grind,-mount", BOT_STATE_NON_COMBAT);
+                    change("+stay,-follow,-passive,-grind,-mount", BOT_STATE_NON_COMBAT);
             }
         }
     }
@@ -1663,13 +1439,6 @@ namespace PvPLife
 
     namespace
     {
-        // A bot this close walks in; farther (or on another map) it is dropped off first. Below
-        // mod-playerbots' ReactDistance (150) so its own "return to stay position" keeps walking it.
-        constexpr float WalkInRange = 140.0f;
-        // Drop-off ring around the destination: past what anyone standing there notices, inside WalkInRange.
-        constexpr float DropOffMinDistance = 70.0f;
-        constexpr float DropOffMaxDistance = 120.0f;
-        constexpr uint32 DropOffAttempts = 24;
         // Riding is worth a mount cast past this.
         constexpr float MountUpDistance = 45.0f;
         // Between duels a bot idles anywhere within this of its staging spot.
@@ -1697,13 +1466,14 @@ namespace PvPLife
         bool sameMap = player->GetMapId() == mapId;
         if (_dropOffArrival && player->IsAlive() && (teleport || !sameMap || !_useMovePoint))
         {
-            if (sameMap && player->GetExactDist2d(x, y) <= WalkInRange)
+            if (sameMap && player->GetExactDist2d(x, y) <= LifeArrival::WalkInRange)
             {
                 WalkBot(player, mapId, x, y, z);
                 return;
             }
             Position dropOff;
-            if (FindDropOff(player, mapId, x, y, z, dropOff))
+            if (LifeArrival::FindDropOff(player, mapId, x, y, z, dropOff,
+                [](Player const* p) { return IsHumanPlayer(p); }))
             {
                 if (player->IsInCombat())
                     player->CombatStop(true);
@@ -1712,7 +1482,7 @@ namespace PvPLife
                 PendingWalk walk;
                 walk.MapId = mapId;
                 walk.X = x; walk.Y = y; walk.Z = z;
-                walk.DueMs = NowMs() + 2500;
+                walk.DueMs = NowMs() + LifeArrival::LandingMs;
                 _pendingWalks[player->GetGUID().GetCounter()] = walk;
                 AuditLog("DROPOFF", "player=" + player->GetName() + " map=" + std::to_string(mapId) +
                     " x=" + std::to_string(dropOff.GetPositionX()) + " y=" + std::to_string(dropOff.GetPositionY()) +
@@ -1747,102 +1517,6 @@ namespace PvPLife
         player->GetMotionMaster()->MovePoint(0, x, y, z);
     }
 
-    bool Manager::FindDropOff(Player* bot, uint32 mapId, float tx, float ty, float tz, Position& dropOff) const
-    {
-        Map* map = sMapMgr->FindBaseNonInstanceMap(mapId);
-        if (!map || map->Instanceable())
-            return false;
-
-        // Paths, heights and creatures are only known where a grid is loaded, so measure from someone
-        // already standing near the destination. Nobody there means nobody to see an arrival either.
-        Player* anchor = nullptr;
-        std::vector<Player*> watchers;
-        for (auto const& ref : map->GetPlayers())
-        {
-            Player* p = ref.GetSource();
-            if (!p || p == bot || !p->IsInWorld() || p->IsBeingTeleported())
-                continue;
-            float d = p->GetExactDist2d(tx, ty);
-            if (d > 250.0f)
-                continue;
-            if (IsHumanPlayer(p))
-                watchers.push_back(p);
-            if (d < 60.0f && p->IsAlive() && !p->IsFlying() && (!anchor || d < anchor->GetExactDist2d(tx, ty)))
-                anchor = p;
-        }
-        if (!anchor)
-            return false;
-
-        // Hostile creatures that would pull the bot on its way in.
-        std::list<Unit*> units;
-        float searchRadius = anchor->GetExactDist2d(tx, ty) + DropOffMaxDistance + 30.0f;
-        Acore::AnyUnitInObjectRangeCheck check(anchor, searchRadius);
-        Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(anchor, units, check);
-        Cell::VisitObjects(anchor, searcher, searchRadius);
-        std::vector<Position> hostiles;
-        for (Unit* unit : units)
-        {
-            Creature* creature = unit->ToCreature();
-            if (!creature || creature->IsCritter() || creature->IsTotem() || creature->IsPet() ||
-                creature->GetReactState() != REACT_AGGRESSIVE || !creature->IsHostileTo(bot) ||
-                creature->GetLevel() + 10 < bot->GetLevel())
-                continue;
-            hostiles.push_back(creature->GetPosition());
-        }
-        auto nearHostile = [&](float x, float y, float radius)
-        {
-            return std::any_of(hostiles.begin(), hostiles.end(),
-                [&](Position const& h) { return h.GetExactDist2d(x, y) < radius; });
-        };
-
-        for (uint32 attempt = 0; attempt < DropOffAttempts; ++attempt)
-        {
-            float angle = frand(0.0f, 2.0f * float(M_PI));
-            float distance = frand(DropOffMinDistance, DropOffMaxDistance);
-            float cx = tx + std::cos(angle) * distance;
-            float cy = ty + std::sin(angle) * distance;
-            float cz = map->GetHeight(anchor->GetPhaseMask(), cx, cy, tz + 30.0f, true, 80.0f);
-            if (cz <= INVALID_HEIGHT + 1.0f || std::fabs(cz - tz) > 35.0f)
-                continue;
-            if (map->IsInWater(anchor->GetPhaseMask(), cx, cy, cz, bot->GetCollisionHeight()))
-                continue;
-
-            // Out of sight: nobody close, and nobody in range with a clear line to it.
-            bool seen = std::any_of(watchers.begin(), watchers.end(), [&](Player* w)
-            {
-                float d = w->GetExactDist(cx, cy, cz);
-                return d < 45.0f || (d < 110.0f && w->IsWithinLOS(cx, cy, cz + 2.0f));
-            });
-            if (seen || nearHostile(cx, cy, 30.0f))
-                continue;
-
-            // A plain walkable route: no partial path, no long detour around a cliff, no ledge drops,
-            // no hostile camp beside the road.
-            PathGenerator path(anchor);
-            if (!path.CalculatePath(cx, cy, cz, tx, ty, tz, false) || path.GetPathType() != PATHFIND_NORMAL)
-                continue;
-            Movement::PointsArray const& points = path.GetPath();
-            if (points.size() < 2)
-                continue;
-            float length = 0.0f;
-            bool clear = true;
-            for (size_t i = 1; i < points.size() && clear; ++i)
-            {
-                G3D::Vector3 const& a = points[i - 1];
-                G3D::Vector3 const& b = points[i];
-                length += (b - a).length();
-                if (std::fabs(b.z - a.z) > 4.5f || nearHostile(b.x, b.y, 20.0f))
-                    clear = false;
-            }
-            if (!clear || length > distance * 1.6f + 15.0f)
-                continue;
-
-            dropOff.Relocate(cx, cy, cz + 0.5f, std::atan2(ty - cy, tx - cx));
-            return true;
-        }
-        return false;
-    }
-
     bool Manager::BotActive(Player* bot) const
     {
         // mod-playerbots' own answer (Playerbots.BotActiveAlone and its force rules: a real player in
@@ -1854,12 +1528,7 @@ namespace PvPLife
 
     bool Manager::RealPlayerWatching(Player* bot) const
     {
-        constexpr float WatchRange = 150.0f;
-        for (auto const& ref : bot->GetMap()->GetPlayers())
-            if (Player* p = ref.GetSource(); p && p != bot && p->IsInWorld() && IsHumanPlayer(p) &&
-                p->GetExactDist2d(bot) <= WatchRange)
-                return true;
-        return false;
+        return LifePresence::Watched(bot, [](Player const* p) { return IsHumanPlayer(p); });
     }
 
     bool Manager::IsLeasedParticipant(uint32 guidLow) const
@@ -2687,9 +2356,6 @@ namespace PvPLife
 
     void Manager::KeepLeasedLevelsFixed()
     {
-        // mod-playerbots' level brackets re-level a random bot in place (realm 2026-10-12: a leased level 9
-        // dinged to 63 mid-duel-event). Its exclude lists are by name and also written by mod-hearthside-chat,
-        // so only names added here are ever taken back out.
         std::unordered_set<std::string> leased;
         std::unordered_set<uint32> leasedGuids;
         for (ActiveEvent const& event : _activeEvents)
@@ -2718,31 +2384,7 @@ namespace PvPLife
         for (auto it = _hopDismountRolled.begin(); it != _hopDismountRolled.end();)
             it = _dismountOnArrival.count(*it) ? std::next(it) : _hopDismountRolled.erase(it);
 
-        auto& brackets = sPlayerbotAIConfig.LevelBracketsExcludeNames;
-        auto& resets = sPlayerbotAIConfig.ResetBotLevelExcludeNames;
-        for (std::string const& name : leased)
-        {
-            bool added = false;
-            for (auto* list : { &brackets, &resets })
-                if (std::find(list->begin(), list->end(), name) == list->end())
-                {
-                    list->push_back(name);
-                    added = true;
-                }
-            if (added)
-                _levelExcludeNamesAdded.insert(name);
-        }
-        for (auto it = _levelExcludeNamesAdded.begin(); it != _levelExcludeNamesAdded.end();)
-        {
-            if (leased.count(*it))
-            {
-                ++it;
-                continue;
-            }
-            for (auto* list : { &brackets, &resets })
-                list->erase(std::remove(list->begin(), list->end(), *it), list->end());
-            it = _levelExcludeNamesAdded.erase(it);
-        }
+        LifeBots::HoldLevels(PlayerbotsLife::ReservationOwner::PvPLife, leased);
     }
 
     void Manager::EngageTarget(Player* bot, Player* target)
@@ -2797,14 +2439,9 @@ namespace PvPLife
             part.OriginalY = player->GetPositionY();
             part.OriginalZ = player->GetPositionZ();
             part.OriginalO = player->GetOrientation();
-            CaptureAIState(player, part.Journal);
-            ApplyPvpStrategies(player, duelMode);
-            if (PlayerbotAI* ai = GET_PLAYERBOT_AI(player))
-            {
-                part.Journal.AppliedCombatChanges = StrategyDelta(part.Journal.CombatStrategies, ai->GetStrategies(BOT_STATE_COMBAT));
-                part.Journal.AppliedNonCombatChanges = StrategyDelta(part.Journal.NonCombatStrategies, ai->GetStrategies(BOT_STATE_NON_COMBAT));
-            }
-            part.Journal.AppliedPvPFlag = player->IsPvP();
+            // The duel ground and the move steps set the "stay" position directly: keep the bot's own.
+            LifeBots::CaptureStay(GET_PLAYERBOT_AI(player), part.Journal);
+            ApplyPvpStrategies(player, duelMode, &part.Journal);
             if (sRandomPlayerbotMgr.IsRandomBot(player))
                 sRandomPlayerbotMgr.ScheduleTeleport(part.Bot.GuidLow, event.EndsAt - now + 60);
             uint32 arrival = urand(_arrivalStaggerMin, _arrivalStaggerMax) + index;
@@ -3420,7 +3057,7 @@ namespace PvPLife
     {
         if (!PlayerbotsLife::BeginRelease(part.Token))
             return; // A stale record cannot clean another generation's actor.
-        if (!part.Deployed || !part.Journal.Captured)
+        if (!part.Deployed || !part.Journal.Captured())
         {
             PlayerbotsLife::ReleaseLeaseExact(part.Token);
             return;
@@ -3446,8 +3083,8 @@ namespace PvPLife
         releasing.Part = part;
         releasing.ReturnHome = returnHome;
         releasing.EnqueuedAt = GameTimeSeconds();
-        // Releases are throttled by MaxChangesPerTick; whatever is left at the deadline takes the
-        // terminal path. It must stay well under the shared registry's RELEASING_LEASE_TTL_SEC.
+        // Releases are throttled to MaxChangesPerTick a second; whatever is left at the deadline
+        // (stuck in combat or a transfer) takes the terminal path. It must stay well under the shared registry's RELEASING_LEASE_TTL_SEC.
         releasing.Deadline = releasing.EnqueuedAt + ReleaseDeadlineSeconds;
         releasing.Phase = ReleasePhase::PendingCombatExit;
         releasing.Attempts = 0;
@@ -3508,6 +3145,13 @@ namespace PvPLife
     {
         auto it = _releasingParticipants.begin();
         uint32 now = GameTimeSeconds();
+        // MaxChangesPerTick releases a second, apart from the deployments' per-tick allowance: at
+        // the default 3 that clears 360 bots inside ReleaseDeadlineSeconds.
+        if (now != _releaseSecond)
+        {
+            _releaseSecond = now;
+            _releasesThisSecond = 0;
+        }
         while (it != _releasingParticipants.end())
         {
             Participant const& part = it->Part;
@@ -3546,7 +3190,7 @@ namespace PvPLife
                 ++it;
                 continue;
             }
-            if (_changesThisTick >= _maxChangesPerTick)
+            if (_releasesThisSecond >= _maxChangesPerTick)
             {
                 ++it;
                 continue;
@@ -3573,22 +3217,12 @@ namespace PvPLife
                 if (it->ReturnHome && player->IsAlive() && !player->IsInCombat())
                 {
                     if (RealPlayerWatching(player))
-                    {
-                        // Seen: walk off and carry on as an ordinary bot here, and hold mod-playerbots'
-                        // own random teleport off for a while too.
-                        if (sRandomPlayerbotMgr.IsRandomBot(player))
-                            sRandomPlayerbotMgr.ScheduleTeleport(part.Bot.GuidLow, urand(1200, 2400));
-                        float angle = frand(0.0f, 2.0f * float(M_PI));
-                        float x = player->GetPositionX() + std::cos(angle) * frand(40.0f, 80.0f);
-                        float y = player->GetPositionY() + std::sin(angle) * frand(40.0f, 80.0f);
-                        float z = player->GetPositionZ();
-                        if (player->GetMap()->CanReachPositionAndGetValidCoords(player, x, y, z))
-                            player->GetMotionMaster()->MovePoint(0, x, y, z);
-                    }
+                        // Seen: walk off and carry on as an ordinary bot here.
+                        LifeArrival::WalkOff(player);
                     else
                         player->TeleportTo(part.OriginalMap, part.OriginalX, part.OriginalY, part.OriginalZ, part.OriginalO);
                 }
-                ++_changesThisTick;
+                ++_releasesThisSecond;
                 it->Phase = ReleasePhase::Released;
                 PlayerbotsLife::ReleaseLeaseExact(part.Token);
                 it = _releasingParticipants.erase(it);
@@ -4560,7 +4194,7 @@ namespace PvPLife
             };
 
             std::vector<RealPlayerTarget> potentialTargets;
-            for (RealPlayerSnapshotEntry const& player : _cachedRealPlayers)
+            for (LifePresence::RealPlayer const& player : _presence.Players())
             {
                 if (!player.IsAlive || player.IsGameMaster || player.HasDuel || player.InCombat)
                     continue;
@@ -4577,7 +4211,7 @@ namespace PvPLife
 
                 RealPlayerTarget rpt;
                 rpt.GuidLow = playerGuid;
-                rpt.Team = player.Team;
+                rpt.Team = player.Team == TEAM_ALLIANCE ? TeamSide::Alliance : TeamSide::Horde;
                 rpt.Level = player.Level;
                 rpt.X = player.X;
                 rpt.Y = player.Y;
@@ -4855,14 +4489,14 @@ namespace PvPLife
         std::optional<InvaderTarget> target;
 
         UpdateRealPlayersSnapshot();
-        for (RealPlayerSnapshotEntry const& candidate : _cachedRealPlayers)
+        for (LifePresence::RealPlayer const& candidate : _presence.Players())
         {
             if (!candidate.IsAlive || !candidate.IsPvP || candidate.IsGameMaster || candidate.Security > SEC_PLAYER)
                 continue;
             if (!candidate.IsGroupLeader || candidate.GroupMembersCount < _reactiveMinGroupSize)
                 continue;
 
-            TeamSide responseTeam = candidate.Team == TeamSide::Alliance ? TeamSide::Horde : TeamSide::Alliance;
+            TeamSide responseTeam = candidate.Team == TEAM_ALLIANCE ? TeamSide::Horde : TeamSide::Alliance;
             if (responseTeam == TeamSide::Horde && !_reactiveHordeEnable)
                 continue;
             if (responseTeam == TeamSide::Alliance && !_reactiveAllianceEnable)
@@ -4883,7 +4517,7 @@ namespace PvPLife
                 continue;
             if (AreaTableEntry const* zoneEntry = sAreaTableStore.LookupEntry(leaderZone))
             {
-                uint32 ownTerritory = candidate.Team == TeamSide::Alliance ? AREATEAM_ALLY : AREATEAM_HORDE;
+                uint32 ownTerritory = candidate.Team == TEAM_ALLIANCE ? AREATEAM_ALLY : AREATEAM_HORDE;
                 if (zoneEntry->team == ownTerritory || zoneEntry->team == AREATEAM_ANY)
                     continue;
             }
@@ -5254,7 +4888,7 @@ namespace PvPLife
         uint32 liveBots = GetLiveWorldBotCount();
         handler->PSendSysMessage(
             "Population: budget={} (live bots={}) mode={} borrowPercent={}% maxTotal={} proportionalScaling={} bots: prefix='{}' respectActivity={} minOnlineReq={}",
-            budget, liveBots, _budgetMode == BudgetMode::Percentage ? "percentage" : "fixed", _borrowPercent,
+            budget, liveBots, _budgetPercentage ? "percentage" : "count", _borrowPercent,
             _maxTotal == 0 ? "uncapped" : std::to_string(_maxTotal).c_str(),
             _proportionalZoneScaling ? 1 : 0,
             _botAccountPrefix, _respectPlayerbotActivity ? 1 : 0, _minOnlineRequired);
@@ -5431,7 +5065,6 @@ namespace PvPLife
         handler->PSendSysMessage("Pending Engagements: {}", _engagementQueue.size());
         handler->PSendSysMessage("Pending Chats: {}", _chatQueue.size());
         handler->PSendSysMessage("Pending Raid Responses: {}", _pendingResponses.size());
-        handler->PSendSysMessage("Cached Bot Accounts: {}", _botAccountCache.size());
 
         PlayerbotsLife::CooperationSnapshot snap = PlayerbotsLife::GetCooperationSnapshot();
         handler->PSendSysMessage("Cooperation: Reserved Total={} (City={}, PvP={}) | Leases: Prov={} Active={} Rel={} | DuelSlots={}",

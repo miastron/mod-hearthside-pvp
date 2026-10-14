@@ -16,6 +16,9 @@
 #error "mod-hearthside-pvp requires mod-hearthside-city beside it in modules/ (for its LifeMotion.h)"
 #endif
 #include "../../mod-hearthside-city/src/LifeMedic.h"
+#include "../../mod-hearthside-city/src/LifeBots.h"
+#include "../../mod-hearthside-city/src/LifePresence.h"
+#include "../../mod-hearthside-city/src/LifeAudit.h"
 #include "AsyncCallbackProcessor.h"
 #include "Position.h"
 #include "QueryCallback.h"
@@ -33,16 +36,17 @@ class Field;
 
 namespace PvPLife
 {
-    // A playerbot's session, by account, whether or not mod-playerbots has
-    // attached its AI yet: it attaches after OnPlayerLogin, so ::IsRealPlayer()
-    // alone reads every bot logging in as a human. Stands in for the
-    // WorldSession::IsBot() this module was written against, which this core
-    // does not have.
+    // LifeBots::IsBotSession / IsHumanPlayer with this module's bot-account filter
+    // (PvPLife.Bots.AccountPrefix/AccountMin/AccountMax/AccountFilterMode).
     bool IsBotSession(Player const* player);
-
-    // A person playing through the client: has a session, is not a bot account and has no
-    // PlayerbotAI attached. A player-owned alt bot is thus neither borrowable nor human.
     bool IsHumanPlayer(Player const* player);
+
+    // PvPLife.Audit.*: Logs/pvplife_audit.log by default.
+    inline LifeAudit::Logger& AuditLogger()
+    {
+        static LifeAudit::Logger logger;
+        return logger;
+    }
 
     class Manager
     {
@@ -67,6 +71,7 @@ namespace PvPLife
         // the participant list. They queue the GUID here; Update() disengages it on the world thread.
         void QueueDisengage(uint32 guidLow);
         bool IsConfiguredBotAccount(uint32 accountId) const;
+        LifeBots::AccountFilter const& Accounts() const { return _accounts; }
         // PlayerScript::OnPlayerDuelEnd, any duel won anywhere (map-update threads): queued for the
         // duel medics, handled on the world thread.
         void QueueDuelEnd(Player* winner, Player* loser);
@@ -78,7 +83,6 @@ namespace PvPLife
         Manager() = default;
 
         bool VerifyDatabase();
-        void ImportPlayerbotDefaults();
 
         std::vector<Zone> LoadZones(bool readyOnly = false, int typeFilter = -1);
         bool LoadZoneByName(std::string name, Zone& out);
@@ -98,7 +102,7 @@ namespace PvPLife
         static uint16 OfflineCacheKey(uint8 minLevel, uint8 maxLevel) { return uint16(uint16(minLevel) << 8 | maxLevel); }
         // True if this bot's mod-hearthside-chat archetype is on PvPLife.Bots.Archetypes
         // (or that list is empty, or the chat module is not in the build).
-        bool FitsArchetype(uint32 guidLow);
+        bool FitsArchetype(uint32 guidLow) const { return _archetypeFilter.Fits(guidLow); }
         Player* FindPlayer(uint32 guidLow) const;
         TeamSide TeamForRace(uint8 race) const;
         bool IsSafeBot(Player* player, bool allowPvPLifeReservation = false) const;
@@ -140,8 +144,9 @@ namespace PvPLife
         void ProcessAdmissionGrants();
         void QueueParticipantRelease(Participant const& participant, bool returnHome);
         void RememberDuelIdentity(uint64 eventId, Player* challenger, Player* target);
-        void CaptureAIState(Player* player, AIStateJournal& journal) const;
-        void RestoreAIState(Player* player, AIStateJournal const& journal) const;
+        // LifeBots::Restore, unless a real player's group or a battleground has taken the bot over
+        // (mod-playerbots reset its strategies itself then).
+        void RestoreAIState(Player* player, LifeBots::StrategyJournal const& journal) const;
         void CloseNativeDuel(Player* player, Participant const& participant) const;
 
         static bool TryParseUInt32(std::string const& str, uint32& outVal);
@@ -219,21 +224,24 @@ namespace PvPLife
             bool Jump = false;
         };
         std::unordered_map<uint32, FootworkCheck> _footworkChecks;
-        // Keeps mod-playerbots' level brackets from re-leveling a bot while it is leased.
+        // Keeps mod-playerbots' level brackets from re-leveling a bot while it is leased
+        // (LifeBots::HoldLevels), and drops per-bot state of bots no longer leased.
         void KeepLeasedLevelsFixed();
         void ProcessReleasingParticipants();
         void ProcessPreparingEvents();
         void DeployEventMembers(ActiveEvent& event, uint32& changesCount, uint32 maxChanges);
 
-        void ApplyPvpStrategies(Player* player, bool duelMode) const;
+        // With a journal the changes are recorded for the restore (at deployment); the re-applications
+        // after mod-playerbots reset a bot's strategies need none, as the restore compares states.
+        void ApplyPvpStrategies(Player* player, bool duelMode, LifeBots::StrategyJournal* journal = nullptr) const;
         // With PvPLife.Movement.DropOffArrival a "teleport" is an arrival: a bot within walking range walks
         // in; anyone else is dropped off out of sight on a clear path and walks or rides the rest.
         void MoveBot(Player* player, uint32 mapId, float x, float y, float z, float o, bool teleport);
         void WalkBot(Player* player, uint32 mapId, float x, float y, float z);
-        bool FindDropOff(Player* bot, uint32 mapId, float x, float y, float z, Position& dropOff) const;
         void ProcessPendingWalks();
         bool IsLeasedParticipant(uint32 guidLow) const;
-        // A real player within sight of this bot: ending an event then walks it off instead of a teleport.
+        // A real player within sight of this bot (LifePresence::Watched): ending an event then walks
+        // it off (LifeArrival::WalkOff) instead of a teleport.
         bool RealPlayerWatching(Player* bot) const;
         // mod-playerbots' BotActiveAlone verdict: new duels, engagements and footwork wait for it.
         bool BotActive(Player* bot) const;
@@ -297,10 +305,10 @@ namespace PvPLife
         std::string _botAccountPrefix = "auto";
         uint32 _botAccountMin = 0;
         uint32 _botAccountMax = 0;
-        AccountFilterMode _accountFilterMode = AccountFilterMode::LegacyAny;
+        bool _accountsRequireBoth = false; // PvPLife.Bots.AccountFilterMode = all
+        LifeBots::AccountFilter _accounts;
         uint32 _botQueryLimit = 500;
-        std::string _archetypes;           // PvPLife.Bots.Archetypes, comma-separated mod-hearthside-chat enum names
-        uint32 _archetypeMask = 0;         // parsed in LoadConfig; 0 with a non-empty list = no bot fits
+        LifeBots::ArchetypeFilter _archetypeFilter; // PvPLife.Bots.Archetypes
         uint32 _minOnlineRequired = 3;
         uint8 _globalMinLevel = 20;
         bool _skipGroupedBots = true;
@@ -403,7 +411,6 @@ namespace PvPLife
             uint64 WalkUntilMs = 0;
         };
         std::unordered_map<uint32, FidgetState> _idleFidget;
-        std::unordered_set<std::string> _levelExcludeNamesAdded;
 
         // Campaigns & chatter
         bool _forTheHordeEnable = true;
@@ -439,12 +446,16 @@ namespace PvPLife
 
         // Population Budget
         bool _populationBudgetEnable = true;
-        BudgetMode _budgetMode = BudgetMode::Percentage;
+        bool _budgetPercentage = true; // PvPLife.Population.BudgetMode: percentage, or count (fixed)
         uint32 _fixedCount = 100;
         uint32 _borrowPercent = 10;
         uint32 _maxTotal = 120;
         uint32 _maxChangesPerTick = 3;
         uint32 _changesThisTick = 0;
+        // Releases have their own allowance, refilled every second, so a large event ending cannot
+        // starve deployments or run past the release deadline (ProcessReleasingParticipants).
+        uint32 _releasesThisSecond = 0;
+        uint32 _releaseSecond = 0;
         bool _proportionalZoneScaling = true;
 
         // Audit log
@@ -475,7 +486,6 @@ namespace PvPLife
         std::unordered_map<uint32, uint32> _playerChallengeCooldown;
         std::unordered_map<uint32, uint32> _botChallengeCooldown;
         std::unordered_map<uint32, uint32> _botDuelCooldown;
-        mutable std::unordered_map<uint32, bool> _botAccountCache;
         mutable uint32 _lastCensusTimeMs = 0;
         mutable uint32 _cachedLiveBotCount = 0;
         QueryCallbackProcessor _queryProcessor;
@@ -499,30 +509,8 @@ namespace PvPLife
         uint32 _lastCooldownPruneTime = 0;
         void PruneExpiredCooldowns();
 
-        struct RealPlayerSnapshotEntry
-        {
-            uint32 GuidLow = 0;
-            uint32 MapId = 0;
-            uint32 ZoneId = 0;
-            uint32 AreaId = 0;
-            TeamSide Team = TeamSide::Any;
-            uint8 Level = 0;
-            float X = 0.0f;
-            float Y = 0.0f;
-            float Z = 0.0f;
-            float O = 0.0f;
-            bool IsAlive = true;
-            bool IsPvP = false;
-            bool InCombat = false;
-            bool HasDuel = false;
-            bool IsGameMaster = false;
-            bool HiddenGm = false; // a GM out of sight wakes no bots in mod-playerbots, so it is no presence here
-            uint32 Security = 0;
-            bool IsGroupLeader = false;
-            uint32 GroupMembersCount = 0;
-        };
-        mutable std::vector<RealPlayerSnapshotEntry> _cachedRealPlayers;
-        mutable uint32 _lastRealPlayerCensusTimeMs = 0;
+        // The real players online (LifePresence::Snapshot), refreshed at most every 3s.
+        mutable LifePresence::Snapshot _presence;
         void UpdateRealPlayersSnapshot() const;
 
         enum class ReleasePhase : uint8
@@ -559,5 +547,6 @@ namespace PvPLife
 }
 
 #define sPvPLifeMgr PvPLife::Manager::Instance()
+#define sPvPLifeAudit PvPLife::AuditLogger()
 
 #endif

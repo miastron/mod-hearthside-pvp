@@ -9,6 +9,7 @@
 
 #include "Define.h"
 #include "LifeBotReservation.h"
+#include "../../mod-hearthside-city/src/LifeBots.h"
 #include <string>
 #include <vector>
 
@@ -35,12 +36,6 @@ namespace PvPLife
         World = 1
     };
 
-    enum class BudgetMode : uint8
-    {
-        Fixed = 0,
-        Percentage = 1
-    };
-
     enum class EventOrigin : uint8
     {
         Zone = 0,
@@ -51,12 +46,6 @@ namespace PvPLife
     {
         Raid = 0,
         Fixed = 1
-    };
-
-    enum class AccountFilterMode : uint8
-    {
-        LegacyAny = 0,
-        All = 1
     };
 
     struct Zone
@@ -107,24 +96,6 @@ namespace PvPLife
         PlayerbotsLife::LeaseToken Token;
     };
 
-    struct AIStateJournal
-    {
-        std::vector<std::string> CombatStrategies;
-        std::vector<std::string> NonCombatStrategies;
-        bool OriginalPvPFlag = false;
-        bool HadStayPosition = false;
-        float StayX = 0.0f;
-        float StayY = 0.0f;
-        float StayZ = 0.0f;
-        uint32 StayMapId = 0;
-        bool Captured = false;
-        // The "+x"/"-x" strategy changes this module applied, so a restore can reverse exactly
-        // those and leave anything else that changed meanwhile alone.
-        std::vector<std::string> AppliedCombatChanges;
-        std::vector<std::string> AppliedNonCombatChanges;
-        bool AppliedPvPFlag = false;
-    };
-
     struct Participant
     {
         BotCandidate Bot;
@@ -141,7 +112,7 @@ namespace PvPLife
         PlayerbotsLife::LeaseToken Token;
         uint32 DuelStagingSlotId = 0;
         uint64 PairId = 0;
-        AIStateJournal Journal;
+        LifeBots::StrategyJournal Journal;
         bool Deployed = false;
         uint64 DuelArbiter = 0;
         uint32 DuelOpponentGuid = 0;

@@ -170,13 +170,17 @@ PvPLife.Bots.MinimumPerSide = 1
 PvPLife.Bots.MaxPerSide = 100
 
 #
-#   PvPLife.Bots.ReturnAfterActivity
+#   PvPLife.Bots.ReturnWhenReleased
 #       Description: Return participating bots to their original locations when the activity ends.
-#                    Releases follow Population.MaxChangesPerTick; a bot still waiting after 120 seconds
-#                    is released at once, and is still restored and sent home.
+#                    A bot a real player can see walks off instead and carries on there as an
+#                    ordinary bot. Up to Population.MaxChangesPerTick bots are released a second; one
+#                    still waiting after 120 seconds (in combat, mid-teleport) is released at once,
+#                    and is still restored and sent home.
+#                    Same key as CityLife.Bots.ReturnWhenReleased. The old name,
+#                    PvPLife.Bots.ReturnAfterActivity, is still read when this one is not set.
 #       Default:     1 (Enabled)
 #
-PvPLife.Bots.ReturnAfterActivity = 1
+PvPLife.Bots.ReturnWhenReleased = 1
 
 ###################################################################################################
 # Movement and Engagement
@@ -703,8 +707,8 @@ PvPLife.Population.Enable = 1
 
 #
 #   PvPLife.Population.BudgetMode
-#       Description: Budget calculation mode: "percentage" (BorrowPercent of the live bots) or "fixed"
-#                    (FixedCount). Any other value is read as "percentage".
+#       Description: Budget calculation mode: "percentage" (BorrowPercent of the live bots) or "count"
+#                    (FixedCount; "fixed" means the same). Any other value is read as "percentage".
 #       Default:     "percentage"
 #
 PvPLife.Population.BudgetMode = "percentage"

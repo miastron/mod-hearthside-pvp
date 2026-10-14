@@ -48,8 +48,10 @@ world thread.
   then per-tick work queues (`_moveQueue`, `_duelQueue`, `_engagementQueue`, `_chatQueue`) and,
   every `_tickSeconds`, the management pass (start/expire events, reactive raid detection, duel
   maintenance, real-player challenges). Bots are released through a phased
-  `_releasingParticipants` queue that runs even while disabled or reloading, restoring captured AI
-  state (`AIStateJournal`). `_maxChangesPerTick` throttles how many bots change state per tick.
+  `_releasingParticipants` queue that runs even while disabled or reloading, restoring what the
+  module changed (`Participant::Journal`, a `LifeBots::StrategyJournal`); a bot a real player can
+  see walks off (`LifeArrival::WalkOff`) instead of teleporting home. `_maxChangesPerTick` throttles
+  deployments per tick and, separately, releases per second.
   Events are sized from the zone row only; nearby real players (mod-playerbots' BotActiveAlone
   rules, `PlayerPresent`) affect only start priority. A watched duel ground winds down one bot at a
   time past its timer (`StartWindDown`/`UpdateWindDown`, `Participant::LeaveAt` lingerers,
@@ -66,8 +68,6 @@ world thread.
   `LIFE_BOT_RESERVATION_PROTOCOL_VERSION` on any change: `AddPvPLifeScripts()` calls
   `CheckProtocolVersion()`, which logs an error when another Life module registered a different
   version. Change both repos together.
-- `src/PvPLifeAudit.h`: async audit logger (`sPvPLifeAudit`) with its own worker thread writing
-  `Logs/pvplife_audit.log`; world-thread code only enqueues.
 - `src/PvPLifeDuelSelection.h`, `src/PvPLifeDuelRequestPolicy.h`: small pure-logic helpers for duel
   pairing and request rules.
 - `../mod-hearthside-city/src/LifeMotion.h` (City owns it; `PvPLifeMgr.h` includes it by relative
@@ -78,6 +78,17 @@ world thread.
   it in the City repo; it is not copied here. `../mod-hearthside-city/src/LifeMedic.h` is included
   the same way: healer duelists heal the duelists of a duel that just ended in front of them
   (`OnPlayerDuelEnd` → `QueueDuelEnd` → `UpdateDuelMedics`, `PvPLife.DuelMedics.*`).
+- The other City-owned shared headers, included the same way (one copy for both modules; change
+  them in the City repo and check both build):
+  - `LifeBots.h`: bot-account filter (`_accounts`, behind `IsBotSession`/`IsHumanPlayer`/
+    `IsHumanControlled`), archetype filter, budget math, live-bot census, the strategy journal and
+    `HoldLevels` (the level freeze behind `KeepLeasedLevelsFixed`, one registry for both modules).
+  - `LifePresence.h`: the real-player snapshot (`_presence`) and mod-playerbots' wake rule
+    (`PlayerPresent`), plus `Watched` (`RealPlayerWatching`).
+  - `LifeArrival.h`: `FindDropOff` (under `MoveBot` with `PvPLife.Movement.DropOffArrival`) and
+    `WalkOff`.
+  - `LifeAudit.h`: the async audit writer; `sPvPLifeAudit` is this module's instance, writing
+    `Logs/pvplife_audit.log` from its own thread (world-thread code only enqueues).
 
 ## Cross-module integration
 
@@ -85,9 +96,9 @@ world thread.
   (account-based), not `IsRealPlayer()` alone: mod-playerbots attaches its AI after
   `OnPlayerLogin`, so a logging-in bot otherwise reads as human.
 - **Archetype filter:** if `hs_archetype.h` from `../mod-hearthside-chat` is on the include path,
-  `PVPLIFE_HAS_ARCHETYPES` is defined and `PvPLife.Bots.Archetypes` restricts which bots may be
-  borrowed (`Manager::FitsArchetype`). Without that module every bot fits; keep the code compiling
-  both ways.
+  City's `LifeBots.h` defines `LIFEBOTS_HAS_ARCHETYPES` and `PvPLife.Bots.Archetypes` restricts which
+  bots may be borrowed (`Manager::FitsArchetype`). Without that module every bot fits; keep the code
+  compiling both ways.
 - Bots are borrowed as-is (no level, talent or gear changes), GMs are never challenged or yelled at,
   and all chatter and announcements default to off in config. Preserve these invariants.
 
@@ -96,4 +107,7 @@ world thread.
 `conf/mod_playerbots_pvp_life.conf.dist` documents every option. A new option needs: a documented
 entry there, a member in `PvPLifeMgr.h`, a read in `Manager::LoadConfig()`, and (if relevant) a field
 in `PrintStatus`. Several bot-account defaults are imported from mod-playerbots' config
-(`ImportPlayerbotDefaults`) when `PvPLife.Bots.UsePlayerbotConfig` is on.
+(`LifeBots::ImportPlayerbotDefaults`) when `PvPLife.Bots.UsePlayerbotConfig` is on. Keys that mean
+the same thing in both modules share their name after the prefix (`Bots.*`, `Population.BudgetMode`
+"percentage"/"count", `Antics.*`, `DuelMedics.*`, `Audit.*`); keep it that way.
+`PvPLife.Bots.ReturnAfterActivity` is the old name of `ReturnWhenReleased`, still read as a fallback.
