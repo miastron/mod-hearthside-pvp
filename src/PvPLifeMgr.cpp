@@ -1979,7 +1979,7 @@ namespace PvPLife
             UpdateBattlegroundFootwork(now);
     }
 
-    FootworkBound Manager::DuelBound(Player* bot, Player* opponent, Participant const& participant,
+    Manager::FootworkBound Manager::DuelBound(Player* bot, Player* opponent, Participant const& participant,
         ActiveEvent const& event) const
     {
         FootworkBound bound;
