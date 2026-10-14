@@ -181,6 +181,21 @@ namespace PvPLife
         // moment it accepts, so during the countdown "new rpg" walked it off and "mount" rode it away
         // until the challenge broke off. Puts the duel set straight back (every ~100 ms from Update).
         void KeepDuelStrategies();
+        // The 3-second duel countdown, used the way players use it: a ranged duelist backs off to its
+        // range, a warrior out to Charge range, and each casts its stealth or self-buffs
+        // (FootworkProfile::Prep, PvPLife.Footwork.DuelPrep). Every ~100 ms from Update.
+        void UpdateDuelPrep();
+        // Where a duelist fights inside: the duel flag's circle and its pair's staging area.
+        FootworkBound DuelBound(Player* bot, Player* opponent, Participant const& participant, ActiveEvent const& event) const;
+        struct DuelPrepState
+        {
+            uint64 CastAtMs = 0;
+            uint64 MoveAtMs = 0;
+            uint64 FaceAtMs = 0; // a bot that turned and ran turns back to its opponent on arrival
+            uint8 Casts = 0;
+            bool Moved = false;
+        };
+        std::unordered_map<uint32, DuelPrepState> _duelPrep;
         // Starts `kind` on an idle duelist now; with None, rolls PvPLife.Antics.ChancePerMinute and picks one.
         bool TryStartAntic(Player* bot, uint32 guidLow, LifeMotion::Antic kind = LifeMotion::Antic::None);
         void StopAntic(uint32 guidLow);
@@ -366,6 +381,7 @@ namespace PvPLife
         bool _footworkWorldPvp = true;
         bool _footworkBattlegrounds = false;
         bool _footworkTrace = false;
+        bool _footworkDuelPrep = true;
         uint32 _footworkIntervalMinMs = 1000;
         uint32 _footworkIntervalMaxMs = 2500;
         uint32 _footworkJumpChance = 35;

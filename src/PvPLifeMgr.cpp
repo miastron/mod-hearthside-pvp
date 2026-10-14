@@ -395,6 +395,7 @@ namespace PvPLife
         _footworkIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMaxMs", 2500), _footworkIntervalMinMs, 60000);
         _footworkJumpChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.JumpChance", 35));
         _footworkTrace = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Trace", false);
+        _footworkDuelPrep = sConfigMgr->GetOption<bool>("PvPLife.Footwork.DuelPrep", true);
         {
             auto matchup = [this](char const* key, DuelRole a, DuelRole b, uint32 fallback)
             {
@@ -1956,29 +1957,8 @@ namespace PvPLife
                     if (!bot->duel || bot->duel->State != DUEL_STATE_IN_PROGRESS)
                         continue;
                     opponent = bot->duel->Opponent;
-                    // Out of bounds is measured from the duel flag: past 50 yards a 10-second countdown
-                    // starts, back inside 40 cancels it (Player::CheckDuelDistance).
-                    GameObject* flag = bot->GetMap()->GetGameObject(bot->GetGuidValue(PLAYER_DUEL_ARBITER));
-                    bound.X = flag ? flag->GetPositionX() : participant.ActivityX;
-                    bound.Y = flag ? flag->GetPositionY() : participant.ActivityY;
-                    bound.Radius = flag ? 38.0f : float(_duelLeashRadius) - 2.0f;
-                    // The flag spawns between the duelists wherever they stand, so a 38-yard
-                    // allowance around it lets every duel start a little farther off than the
-                    // last (realm 2026-10-12: pairs drifting onto the road). Anchor to the pair's
-                    // staging spots as well: the midpoint of both duelists' own spots. Not each
-                    // bot's own spot -- re-paired bots come from different lanes, and two home
-                    // pulls 36 yards apart dragged a warrior and a hunter apart for a whole duel
-                    // (realm 2026-10-13, Gracie and Jarenn).
-                    bound.HomeX = participant.ActivityX;
-                    bound.HomeY = participant.ActivityY;
-                    for (Participant const& other : event.Members)
-                        if (other.Bot.GuidLow == opponent->GetGUID().GetCounter())
-                        {
-                            bound.HomeX = (participant.ActivityX + other.ActivityX) * 0.5f;
-                            bound.HomeY = (participant.ActivityY + other.ActivityY) * 0.5f;
-                            break;
-                        }
-                    bound.HomeRadius = DuelFootworkHomeRadius;
+                    if (opponent)
+                        bound = DuelBound(bot, opponent, participant, event);
                 }
                 else
                 {
@@ -1997,6 +1977,36 @@ namespace PvPLife
         }
         if (_footworkBattlegrounds)
             UpdateBattlegroundFootwork(now);
+    }
+
+    FootworkBound Manager::DuelBound(Player* bot, Player* opponent, Participant const& participant,
+        ActiveEvent const& event) const
+    {
+        FootworkBound bound;
+        // Out of bounds is measured from the duel flag: past 50 yards a 10-second countdown
+        // starts, back inside 40 cancels it (Player::CheckDuelDistance).
+        GameObject* flag = bot->GetMap()->GetGameObject(bot->GetGuidValue(PLAYER_DUEL_ARBITER));
+        bound.X = flag ? flag->GetPositionX() : participant.ActivityX;
+        bound.Y = flag ? flag->GetPositionY() : participant.ActivityY;
+        bound.Radius = flag ? 38.0f : float(_duelLeashRadius) - 2.0f;
+        // The flag spawns between the duelists wherever they stand, so a 38-yard
+        // allowance around it lets every duel start a little farther off than the
+        // last (realm 2026-10-12: pairs drifting onto the road). Anchor to the pair's
+        // staging spots as well: the midpoint of both duelists' own spots. Not each
+        // bot's own spot -- re-paired bots come from different lanes, and two home
+        // pulls 36 yards apart dragged a warrior and a hunter apart for a whole duel
+        // (realm 2026-10-13, Gracie and Jarenn).
+        bound.HomeX = participant.ActivityX;
+        bound.HomeY = participant.ActivityY;
+        for (Participant const& other : event.Members)
+            if (other.Bot.GuidLow == opponent->GetGUID().GetCounter())
+            {
+                bound.HomeX = (participant.ActivityX + other.ActivityX) * 0.5f;
+                bound.HomeY = (participant.ActivityY + other.ActivityY) * 0.5f;
+                break;
+            }
+        bound.HomeRadius = DuelFootworkHomeRadius;
+        return bound;
     }
 
     void Manager::UpdateBattlegroundFootwork(uint64 now)
@@ -2342,7 +2352,7 @@ namespace PvPLife
                     !ai->HasStrategy("new rpg", BOT_STATE_NON_COMBAT) && !ai->HasStrategy("mount", BOT_STATE_NON_COMBAT)))
                     continue;
                 ApplyPvpStrategies(bot, true);
-                // Whatever the defaults already started: stand still for the countdown.
+                // Whatever the defaults already started: stop it (UpdateDuelPrep makes the countdown moves).
                 if (bot->duel->State == DUEL_STATE_COUNTDOWN)
                 {
                     if (bot->IsMounted() || bot->HasMountedAura())
@@ -2350,7 +2360,8 @@ namespace PvPLife
                         bot->Dismount();
                         bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
                     }
-                    if (bot->isMoving())
+                    auto prep = _duelPrep.find(participant.Bot.GuidLow);
+                    if (bot->isMoving() && (prep == _duelPrep.end() || !prep->second.Moved)) // not its own countdown move
                     {
                         bot->StopMoving();
                         bot->GetMotionMaster()->Clear();
@@ -2360,6 +2371,136 @@ namespace PvPLife
                     AuditLog("DUELSTRAT", "bot=" + bot->GetName() + " restored after mod-playerbots' duel-accept reset");
             }
         }
+    }
+
+    void Manager::UpdateDuelPrep()
+    {
+        if (!_footworkDuelPrep)
+        {
+            _duelPrep.clear();
+            return;
+        }
+        uint64 now = NowMs();
+        std::unordered_set<uint32> counting;
+        for (ActiveEvent const& event : _activeEvents)
+        {
+            if (event.Closing || event.EventZone.Type != ActivityType::Duel)
+                continue;
+            for (Participant const& participant : event.Members)
+            {
+                uint32 guid = participant.Bot.GuidLow;
+                Player* bot = FindPlayer(guid);
+                if (!bot || !bot->IsInWorld() || !bot->IsAlive() || !bot->duel || bot->duel->State != DUEL_STATE_COUNTDOWN ||
+                    !bot->duel->Opponent || !participant.Deployed || IsHumanControlled(bot) ||
+                    !PlayerbotsLife::ValidateActiveLease(participant.Token))
+                    continue;
+                PlayerbotAI* ai = GET_PLAYERBOT_AI(bot);
+                if (!ai)
+                    continue;
+                counting.insert(guid);
+                Player* opponent = bot->duel->Opponent;
+                auto [entry, fresh] = _duelPrep.try_emplace(guid);
+                DuelPrepState& prep = entry->second;
+                if (fresh)
+                {
+                    // A player's reaction to the accept, not the same tick for every duelist.
+                    prep.CastAtMs = now + urand(200, 600);
+                    prep.MoveAtMs = now + urand(300, 800);
+                    continue;
+                }
+                if (bot->IsMounted() || bot->HasMountedAura())
+                {
+                    bot->Dismount();
+                    bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+                    continue;
+                }
+                if (prep.FaceAtMs && now >= prep.FaceAtMs)
+                {
+                    prep.FaceAtMs = 0;
+                    if (!bot->isMoving())
+                        bot->SetFacingToObject(opponent);
+                }
+                bool casting = bot->IsNonMeleeSpellCast(false) || bot->HasUnitState(UNIT_STATE_CASTING);
+                FootworkProfile const& profile = FootworkProfileFor(bot->getClass(), AiFactory::GetPlayerSpecTab(bot));
+
+                // Stealth, a shield, a form: whatever it does not already wear, a GCD apart.
+                if (prep.Casts < 2 && now >= prep.CastAtMs && !casting)
+                {
+                    char const* cast = nullptr;
+                    for (FootworkSpell const& spell : profile.Prep)
+                    {
+                        if (!spell.Name)
+                            break;
+                        if (!ai->HasAura(spell.Name, bot) && ai->CanCastSpell(spell.Name, bot) && ai->CastSpell(spell.Name, bot))
+                        {
+                            cast = spell.Name;
+                            break;
+                        }
+                    }
+                    prep.Casts = cast ? prep.Casts + 1 : 2;
+                    prep.CastAtMs = now + 1600;
+                    if (cast)
+                    {
+                        casting = bot->HasUnitState(UNIT_STATE_CASTING);
+                        if (_footworkTrace)
+                            AuditLog("DUELPREP", "bot=" + bot->GetName() + " cast=" + cast);
+                    }
+                }
+
+                // Out to the distance it wants to start the fight at.
+                if (prep.Moved || now < prep.MoveAtMs || casting)
+                    continue;
+                prep.Moved = true;
+                float mine = PrepDistance(bot->getClass(), profile);
+                if (mine <= 0.0f)
+                    continue;
+                // Measured from where the opponent is going if its own countdown move is under way. An
+                // opponent that backs off at least as far and has yet to move covers half the ground.
+                Position them = opponent->GetPosition();
+                if (!opponent->movespline->Finalized())
+                {
+                    G3D::Vector3 dest = opponent->movespline->FinalDestination();
+                    them.Relocate(dest.x, dest.y, dest.z);
+                }
+                bool opponentLeased = std::any_of(event.Members.begin(), event.Members.end(), [opponent](Participant const& p)
+                    { return p.Deployed && p.Bot.GuidLow == opponent->GetGUID().GetCounter(); }) && !IsHumanControlled(opponent);
+                auto theirPrep = _duelPrep.find(opponent->GetGUID().GetCounter());
+                bool shareGround = opponentLeased && (theirPrep == _duelPrep.end() || !theirPrep->second.Moved) &&
+                    PrepDistance(opponent->getClass(), FootworkProfileFor(opponent->getClass(), AiFactory::GetPlayerSpecTab(opponent))) >= mine;
+                float distance = bot->GetExactDist2d(them.GetPositionX(), them.GetPositionY());
+                float want = shareGround ? distance + (mine - distance) * 0.5f : mine;
+                float retreat = std::min(want - distance, 18.0f); // what a run covers in the countdown
+                if (retreat < 1.5f)
+                    continue;
+
+                // A short way backpedals facing the opponent; farther it turns and runs, then turns back.
+                FootworkBound bound = DuelBound(bot, opponent, participant, event);
+                float away = them.GetAngle(bot->GetPositionX(), bot->GetPositionY());
+                bool run = retreat > 8.0f;
+                LifeMotion::Landing landing;
+                bool launched = false;
+                for (float scale : { 1.0f, 0.6f })
+                    for (float turn : { 0.0f, 0.5f, -0.5f, 1.0f, -1.0f })
+                    {
+                        if (launched)
+                            break;
+                        LifeMotion::Move move;
+                        move.From = them;
+                        move.Angle = away + turn + frand(-0.15f, 0.15f);
+                        move.Distance = distance + retreat * scale;
+                        move.Face = run ? nullptr : opponent;
+                        move.MoveStay = true;
+                        launched = LifeMotion::Launch(bot, move, bound, &landing);
+                    }
+                if (launched && run)
+                    prep.FaceAtMs = now + uint64(std::max(landing.DurationMs, 0)) + urand(100, 300);
+                if (_footworkTrace)
+                    AuditLog("DUELPREP", "bot=" + bot->GetName() + " dist=" + std::to_string(int(distance)) +
+                        " want=" + std::to_string(int(want)) + (launched ? (run ? " run" : " backpedal") : " blocked"));
+            }
+        }
+        for (auto it = _duelPrep.begin(); it != _duelPrep.end();)
+            it = counting.count(it->first) ? std::next(it) : _duelPrep.erase(it);
     }
 
     void Manager::UpdateAntics()
@@ -5073,6 +5214,7 @@ namespace PvPLife
         {
             _anticTimerMs = 0;
             KeepDuelStrategies();
+            UpdateDuelPrep();
             UpdateAntics();
             UpdateDuelMedics();
         }

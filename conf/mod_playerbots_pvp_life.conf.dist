@@ -488,6 +488,19 @@ PvPLife.Footwork.WorldPvP = 1
 PvPLife.Footwork.Battlegrounds = 0
 
 #
+#   PvPLife.Footwork.DuelPrep
+#       Description: Leased duelists use the 3-second countdown the way players do instead of standing
+#                    still: a ranged spec backs off to its range (hunters 25 yards, casters 20, priests 16)
+#                    and a warrior out to Charge range, turning to run when it is far and backpedalling when
+#                    it is close; and each casts up to two self-spells it is not already wearing (Stealth,
+#                    Prowl, Power Word: Shield, Ice Barrier, Demonic Circle, a shield or a HoT...). Two bots
+#                    that both back off share the ground. Works without PvPLife.Footwork.Duels. Traced as
+#                    DUELPREP lines with PvPLife.Footwork.Trace.
+#       Default:     1 (Enabled)
+#
+PvPLife.Footwork.DuelPrep = 1
+
+#
 #   PvPLife.Footwork.IntervalMinMs / IntervalMaxMs
 #       Description: Random delay between one bot's footwork decisions, in milliseconds.
 #       Default:     1000, 2500
@@ -505,7 +518,7 @@ PvPLife.Footwork.JumpChance = 35
 #
 #   PvPLife.Footwork.Trace
 #       Description: Write every footwork decision (the move, the spell cast, or why the bot held still) to
-#                    the audit log as FOOTWORK lines. For tuning; noisy.
+#                    the audit log as FOOTWORK lines (and countdown prep as DUELPREP). For tuning; noisy.
 #       Default:     0 (Disabled)
 #
 PvPLife.Footwork.Trace = 0
