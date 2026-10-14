@@ -395,9 +395,11 @@ PvPLife.Duel.Matchup.TankVsHealer = 0
 
 #
 #   PvPLife.Duel.IdleFidget.Enable / MinSeconds / MaxSeconds
-#       Description: Between bouts an idle duelist now and then strolls to another spot within 6 yards of
-#                    its staging spot, or turns to watch a duel nearby, its partner, a real player close by
-#                    or nowhere in particular, so the pairs do not stand frozen face to face. Each bot acts
+#       Description: Between bouts an idle duelist now and then wanders a few yards within 6 yards of
+#                    its staging spot (mostly ahead or to one side, mostly at a run, and often a look
+#                    round on arriving), sidesteps a yard or two, or turns to watch a duel nearby, its
+#                    partner, a real player close by, or glances off to one side, so the pairs do not
+#                    stand frozen face to face. Each bot acts
 #                    once every MinSeconds to MaxSeconds, only while mod-playerbots has it active (a real
 #                    player nearby).
 #       Default:     1 (Enabled), 6, 20
@@ -498,7 +500,9 @@ PvPLife.Footwork.Battlegrounds = 0
 #                    and a warrior out to Charge range, turning to run when it is far and backpedalling when
 #                    it is close; and each casts up to two self-spells it is not already wearing (Stealth,
 #                    Prowl, Power Word: Shield, Ice Barrier, Demonic Circle, a shield or a HoT...). Two bots
-#                    that both back off share the ground. Works without PvPLife.Footwork.Duels. Traced as
+#                    that both back off share the ground unevenly and react at different moments, each
+#                    at its own angle; one already close to its range often just waits. Works without
+#                    PvPLife.Footwork.Duels. Traced as
 #                    DUELPREP lines with PvPLife.Footwork.Trace.
 #       Default:     1 (Enabled)
 #
@@ -531,7 +535,9 @@ PvPLife.Footwork.Trace = 0
 #   PvPLife.Antics.Enable
 #       Description: Between bouts an idle bot on a duel ground now and then plays out an antic: Dance
 #                    (/dance), HopBackForth (hops forward and back, backpedalling or turning round
-#                    between hops), HopSideToSide (strafe hops) or BunnyHop (hop after hop round a circle, a figure 8 or a zigzag). It stops at once
+#                    between hops), HopSideToSide (strafe hops) or BunnyHop (hop after hop on a
+#                    wandering line, or round a loose circle, a figure 8 or a zigzag). A bot does not
+#                    start the antic another bot within 20 yards is already doing. It stops at once
 #                    when the bot is picked for a duel, fights, is released or mod-playerbots pauses it.
 #                    The code is mod-hearthside-life's src/LifeMotion.h, shared with City Life's
 #                    CityLife.Antics.*. Test one with .pvplife debug antic <name> <antic>.

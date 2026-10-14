@@ -1402,7 +1402,8 @@ namespace PvPLife
         // Between duels a bot idles anywhere within this of its staging spot.
         constexpr float DuelHomeAreaRadius = 6.0f;
         // Mid-duel footwork never carries a bot farther than this from its staging spot.
-        constexpr float DuelFootworkHomeRadius = 25.0f;
+        // 20 still fits a hunter's 25-yard band either side of the pair's midpoint.
+        constexpr float DuelFootworkHomeRadius = 20.0f;
 
         uint64 NowMs()
         {
@@ -1807,7 +1808,16 @@ namespace PvPLife
             if (LifeMotion::Running(routine) || !LifeMotion::Reached(now, readyAt) ||
                 !LifeMotion::RollAntic(odds, _duelGuardIntervalMs))
                 return false;
-            kind = LifeMotion::PickAntic(_antics);
+            // Not what a bot close by is already doing: two neighbours hopping the same shape
+            // together reads as one script running twice.
+            uint8 avoid = 0;
+            for (auto const& [otherGuid, other] : _anticRoutines)
+                if (otherGuid != guidLow && LifeMotion::Running(other))
+                    if (Player* neighbour = FindPlayer(otherGuid); neighbour && bot->IsWithinDistInMap(neighbour, 20.0f))
+                        avoid |= LifeMotion::AnticBit(other.Kind);
+            kind = LifeMotion::PickAntic(_antics, avoid);
+            if (kind == LifeMotion::Antic::None)
+                return false;
         }
         else if (LifeMotion::Running(routine))
             LifeMotion::End(bot, routine, now, _antics);
@@ -1838,42 +1848,72 @@ namespace PvPLife
             state.NextMs = now + urand(0, uint32(interval));
             return false;
         }
-        if (now < state.NextMs)
+        // Just back from a stroll: a moment later, a look at whatever is worth watching. Nothing is,
+        // and it keeps the way it walked rather than snapping round.
+        bool settling = state.SettleAtMs && now >= state.SettleAtMs;
+        if (settling)
+        {
+            state.SettleAtMs = 0;
+            state.NextMs = std::max(state.NextMs, now + interval / 2);
+        }
+        else if (now < state.NextMs)
             return false;
-        state.NextMs = now + interval;
+        else
+            state.NextMs = now + interval;
 
-        uint32 roll = urand(1, 100);
+        uint32 roll = settling ? urand(53, 92) : urand(1, 100);
         if (roll <= 45)
         {
-            // A stroll to somewhere else in the home area, at walking pace.
-            for (int attempt = 0; attempt < 4; ++attempt)
+            // A stroll to somewhere else in the home area, mostly ahead or off to one side the way a
+            // player wanders, rarely straight back. Players seldom walk: most strolls are a short run.
+            LifeMotion::Bound bound;
+            bound.HomeX = participant.ActivityX;
+            bound.HomeY = participant.ActivityY;
+            bound.HomeRadius = DuelHomeAreaRadius + 1.0f;
+            for (int attempt = 0; attempt < 6; ++attempt)
             {
-                float angle = frand(0.0f, 2.0f * float(M_PI));
-                float radius = frand(0.0f, DuelHomeAreaRadius);
-                float x = participant.ActivityX + std::cos(angle) * radius;
-                float y = participant.ActivityY + std::sin(angle) * radius;
-                if (bot->GetExactDist2d(x, y) < 1.5f)
-                    continue;
+                float angle = attempt < 4 ? bot->GetOrientation() + frand(-1.2f, 1.2f) : frand(0.0f, 2.0f * float(M_PI));
                 LifeMotion::Move move;
                 move.From = bot->GetPosition();
-                move.Angle = std::atan2(y - bot->GetPositionY(), x - bot->GetPositionX());
-                move.Distance = bot->GetExactDist2d(x, y);
-                move.Walk = true;
+                move.Angle = angle;
+                move.Distance = frand(2.0f, 7.0f);
+                move.Walk = urand(1, 100) <= 25;
                 move.MoveStay = true;
-                LifeMotion::Bound bound;
-                bound.HomeX = participant.ActivityX;
-                bound.HomeY = participant.ActivityY;
-                bound.HomeRadius = DuelHomeAreaRadius + 1.0f;
                 LifeMotion::Landing landing;
                 if (LifeMotion::Launch(bot, move, bound, &landing))
                 {
                     state.WalkUntilMs = now + uint64(std::max(landing.DurationMs, 0)) + 500;
+                    if (urand(1, 100) <= 60)
+                        state.SettleAtMs = state.WalkUntilMs + urand(300, 2000);
                     return true;
                 }
             }
         }
+        else if (roll <= 52)
+        {
+            // A step or two to the side, still facing the same way: shifting weight, making room.
+            LifeMotion::Bound bound;
+            bound.HomeX = participant.ActivityX;
+            bound.HomeY = participant.ActivityY;
+            bound.HomeRadius = DuelHomeAreaRadius + 1.0f;
+            LifeMotion::Move move;
+            move.From = bot->GetPosition();
+            move.Angle = bot->GetOrientation() + (urand(0, 1) ? 1.0f : -1.0f) * float(M_PI) * 0.5f + frand(-0.3f, 0.3f);
+            move.Distance = frand(1.2f, 2.5f);
+            move.HoldFacing = true;
+            move.FacingAngle = bot->GetOrientation();
+            move.Walk = urand(1, 100) <= 50;
+            move.MoveStay = true;
+            LifeMotion::Landing landing;
+            if (LifeMotion::Launch(bot, move, bound, &landing))
+            {
+                state.WalkUntilMs = now + uint64(std::max(landing.DurationMs, 0)) + 300;
+                return true;
+            }
+        }
 
-        // A turn: to watch a duel nearby, to the partner, to a real player close by, or anywhere.
+        // A turn: to watch a duel nearby, to the partner, to a real player close by, or a glance
+        // off to one side (never an about-face to nothing).
         WorldObject* face = nullptr;
         if (roll <= 75 && !fighting.empty())
         {
@@ -1898,9 +1938,12 @@ namespace PvPLife
                     break;
                 }
         if (face)
-            bot->SetFacingToObject(face);
-        else
-            bot->SetFacingTo(frand(0.0f, 2.0f * float(M_PI)));
+        {
+            if (!bot->HasInArc(0.35f, face))
+                bot->SetFacingToObject(face);
+        }
+        else if (!settling)
+            bot->SetFacingTo(Position::NormalizeOrientation(bot->GetOrientation() + (urand(0, 1) ? 1.0f : -1.0f) * frand(0.4f, 1.6f)));
         return true;
     }
 
@@ -2030,9 +2073,19 @@ namespace PvPLife
                 DuelPrepState& prep = entry->second;
                 if (fresh)
                 {
-                    // A player's reaction to the accept, not the same tick for every duelist.
-                    prep.CastAtMs = now + urand(200, 600);
-                    prep.MoveAtMs = now + urand(300, 800);
+                    // A player's reaction to the accept, not the same tick for every duelist, and
+                    // never both of a pair in step: the second to react moves well after the first.
+                    prep.CastAtMs = now + urand(150, 900);
+                    prep.MoveAtMs = now + urand(250, 1400);
+                    prep.Share = frand(0.3f, 0.7f);
+                    auto theirs = _duelPrep.find(opponent->GetGUID().GetCounter());
+                    if (theirs != _duelPrep.end() && !theirs->second.Moved)
+                    {
+                        uint64 gap = prep.MoveAtMs > theirs->second.MoveAtMs ? prep.MoveAtMs - theirs->second.MoveAtMs
+                                                                               : theirs->second.MoveAtMs - prep.MoveAtMs;
+                        if (gap < 500)
+                            prep.MoveAtMs = std::min(theirs->second.MoveAtMs + urand(500, 1100), now + 2200);
+                    }
                     continue;
                 }
                 if (bot->IsMounted() || bot->HasMountedAura())
@@ -2078,9 +2131,11 @@ namespace PvPLife
                 if (prep.Moved || now < prep.MoveAtMs || casting)
                     continue;
                 prep.Moved = true;
-                float mine = PrepDistance(bot->getClass(), profile);
-                if (mine <= 0.0f)
+                float preferred = PrepDistance(bot->getClass(), profile);
+                if (preferred <= 0.0f)
                     continue;
+                // Players judge the distance by eye.
+                float mine = preferred * frand(0.85f, 1.1f);
                 // Measured from where the opponent is going if its own countdown move is under way. An
                 // opponent that backs off at least as far and has yet to move covers half the ground.
                 Position them = opponent->GetPosition();
@@ -2093,16 +2148,18 @@ namespace PvPLife
                     { return p.Deployed && p.Bot.GuidLow == opponent->GetGUID().GetCounter(); }) && !IsHumanControlled(opponent);
                 auto theirPrep = _duelPrep.find(opponent->GetGUID().GetCounter());
                 bool shareGround = opponentLeased && (theirPrep == _duelPrep.end() || !theirPrep->second.Moved) &&
-                    PrepDistance(opponent->getClass(), FootworkProfileFor(opponent->getClass(), AiFactory::GetPlayerSpecTab(opponent))) >= mine;
+                    PrepDistance(opponent->getClass(), FootworkProfileFor(opponent->getClass(), AiFactory::GetPlayerSpecTab(opponent))) >= preferred;
                 float distance = bot->GetExactDist2d(them.GetPositionX(), them.GetPositionY());
-                float want = shareGround ? distance + (mine - distance) * 0.5f : mine;
+                float want = shareGround ? distance + (mine - distance) * prep.Share : mine;
                 float retreat = std::min(want - distance, 18.0f); // what a run covers in the countdown
-                if (retreat < 1.5f)
+                // Not far off already: as often as not a player just stays put and waits.
+                if (retreat < 1.5f || (retreat < 4.0f && urand(1, 100) <= 50))
                     continue;
 
                 // A short way backpedals facing the opponent; farther it turns and runs, then turns back.
+                // Out at an angle of its own choosing, not straight down the line between them.
                 FootworkBound bound = DuelBound(bot, opponent, participant, event);
-                float away = them.GetAngle(bot->GetPositionX(), bot->GetPositionY());
+                float away = them.GetAngle(bot->GetPositionX(), bot->GetPositionY()) + frand(-0.5f, 0.5f);
                 bool run = retreat > 8.0f;
                 LifeMotion::Landing landing;
                 bool launched = false;
@@ -2120,7 +2177,7 @@ namespace PvPLife
                         launched = LifeMotion::Launch(bot, move, bound, &landing);
                     }
                 if (launched && run)
-                    prep.FaceAtMs = now + uint64(std::max(landing.DurationMs, 0)) + urand(100, 300);
+                    prep.FaceAtMs = now + uint64(std::max(landing.DurationMs, 0)) + urand(100, 700);
                 if (_footworkTrace)
                     AuditLog("DUELPREP", "bot=" + bot->GetName() + " dist=" + std::to_string(int(distance)) +
                         " want=" + std::to_string(int(want)) + (launched ? (run ? " run" : " backpedal") : " blocked"));
@@ -2823,6 +2880,15 @@ namespace PvPLife
             uint32 eventDurationMs = static_cast<uint32>(std::min<uint64>(
                 uint64(event.EndsAt - now + (_windDownEnable ? _windDownMaxSeconds : 0)) * IN_MILLISECONDS, 0x7FFFFFFFu));
 
+            // The pairs' spots ring the zone point as tightly as the shared lattice's 20-yard
+            // separation allows, turned a random way each event. Lanes offset along world Y and
+            // pushed out along the lattice left the whole ground off to one side of its point
+            // (realm 2026-10-14: Stormwind's duels out on the road, empty grass in the middle).
+            float centreX = (zone.RallyX + zone.TargetX) * 0.5f;
+            float centreY = (zone.RallyY + zone.TargetY) * 0.5f;
+            float ringRadius = numPairs > 1 ? 20.5f / (2.0f * std::sin(float(M_PI) / float(numPairs))) : 0.0f;
+            float ringTurn = frand(0.0f, 2.0f * float(M_PI));
+
             for (uint32 i = 0; i < numPairs; ++i)
             {
                 BotCandidate const& candA = attackers[i];
@@ -2838,12 +2904,9 @@ namespace PvPLife
                 uint64 pairId = _nextPairId++;
 
                 // Duel pair staging: allocate a single DuelStagingSlot per pair (PV-17)
-                uint32 duelJitter = std::min<uint32>(_positionJitter, 1);
-                float laneOffset = (float(i) - float(numPairs - 1) * 0.5f) * 8.0f;
-                float sx = (zone.RallyX + zone.TargetX) * 0.5f +
-                    static_cast<float>(irand(-static_cast<int32>(duelJitter), static_cast<int32>(duelJitter)));
-                float sy = (zone.RallyY + zone.TargetY) * 0.5f + laneOffset +
-                    static_cast<float>(irand(-static_cast<int32>(duelJitter), static_cast<int32>(duelJitter)));
+                float ringAngle = ringTurn + float(i) * 2.0f * float(M_PI) / float(numPairs);
+                float sx = centreX + std::cos(ringAngle) * ringRadius;
+                float sy = centreY + std::sin(ringAngle) * ringRadius;
                 float sz = (zone.RallyZ + zone.TargetZ) * 0.5f;
 
                 PlayerbotsLife::DuelStagingSlot slot;
@@ -5141,6 +5204,9 @@ namespace PvPLife
             else
                 report(QueueZoneMutation(Acore::StringFormat("UPDATE pvp_life_zone SET map_id={},target_x={},target_y={},target_z={},target_o={} WHERE name='{}'",
                     gm->GetMapId(), gm->GetPositionX(), gm->GetPositionY(), gm->GetPositionZ(), gm->GetOrientation(), name)));
+            // Echo the spot, so it can be copied into the shipped seed without .gps.
+            handler->PSendSysMessage("{} {}: map {} x {:.2f} y {:.2f} z {:.2f} o {:.2f}", zone.Name, action, gm->GetMapId(),
+                gm->GetPositionX(), gm->GetPositionY(), gm->GetPositionZ(), gm->GetOrientation());
             return true;
         }
         if (action == "counts")

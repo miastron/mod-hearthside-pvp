@@ -195,6 +195,7 @@ namespace PvPLife
             uint64 CastAtMs = 0;
             uint64 MoveAtMs = 0;
             uint64 FaceAtMs = 0; // a bot that turned and ran turns back to its opponent on arrival
+            float Share = 0.5f;  // of the ground both back off, the part this bot covers when it moves first
             uint8 Casts = 0;
             bool Moved = false;
         };
@@ -409,6 +410,7 @@ namespace PvPLife
         {
             uint64 NextMs = 0;
             uint64 WalkUntilMs = 0;
+            uint64 SettleAtMs = 0; // after a stroll, a moment later, a look at something worth watching
         };
         std::unordered_map<uint32, FidgetState> _idleFidget;
 
