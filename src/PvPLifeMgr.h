@@ -15,6 +15,7 @@
 #else
 #error "mod-hearthside-pvp requires mod-hearthside-city beside it in modules/ (for its LifeMotion.h)"
 #endif
+#include "../../mod-hearthside-city/src/LifeMedic.h"
 #include "AsyncCallbackProcessor.h"
 #include "Position.h"
 #include "QueryCallback.h"
@@ -64,6 +65,9 @@ namespace PvPLife
         // the participant list. They queue the GUID here; Update() disengages it on the world thread.
         void QueueDisengage(uint32 guidLow);
         bool IsConfiguredBotAccount(uint32 accountId) const;
+        // PlayerScript::OnPlayerDuelEnd, any duel won anywhere (map-update threads): queued for the
+        // duel medics, handled on the world thread.
+        void QueueDuelEnd(Player* winner, Player* loser);
 
     private:
         void ProcessQueuedDisengages();
@@ -174,6 +178,9 @@ namespace PvPLife
         bool TryStartAntic(Player* bot, uint32 guidLow, LifeMotion::Antic kind = LifeMotion::Antic::None);
         void StopAntic(uint32 guidLow);
         bool AnticRunning(uint32 guidLow) const;
+        // Healer duelists who now and then heal the duelists of a duel that just finished in front of
+        // them (LifeMedic.h, PvPLife.DuelMedics.*). Every ~100 ms from Update.
+        void UpdateDuelMedics();
         // Between bouts an idle duelist now and then strolls to another spot in its home area or turns
         // to watch a fight, its partner, a real player or nothing much (PvPLife.Duel.IdleFidget.*), so
         // the pairs do not stand frozen face to face. True if it did something.
@@ -316,6 +323,10 @@ namespace PvPLife
         std::unordered_map<uint32, LifeMotion::Routine> _anticRoutines; // idle entries keep the cooldown
         std::unordered_set<uint32> _hopDismountRolled; // riders already rolled for a mid-air dismount
         uint32 _anticTimerMs = 0;
+        LifeMedic::Config _medics;
+        std::mutex _duelEndMutex;
+        std::vector<LifeMedic::DuelEnd> _duelEnds;
+        std::vector<LifeMedic::PendingHeal> _pendingHeals;
         bool _idleFidgetEnable = true;
         uint32 _idleFidgetMinSeconds = 6;
         uint32 _idleFidgetMaxSeconds = 20;

@@ -71,7 +71,9 @@ world thread.
   `LifeMotion::Launch` is the validated jump/curve move under duel footwork (`FootworkStep`,
   `FootworkBound` is its `Bound`), and the antic `Routine`s are the idle duel-ground antics
   (`UpdateAntics` every ~100 ms, `PvPLife.Antics.*`, `.pvplife debug antic <name> <antic>`). Change
-  it in the City repo; it is not copied here.
+  it in the City repo; it is not copied here. `../mod-hearthside-city/src/LifeMedic.h` is included
+  the same way: healer duelists heal the duelists of a duel that just ended in front of them
+  (`OnPlayerDuelEnd` → `QueueDuelEnd` → `UpdateDuelMedics`, `PvPLife.DuelMedics.*`).
 
 ## Cross-module integration
 

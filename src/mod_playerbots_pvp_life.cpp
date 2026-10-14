@@ -49,13 +49,19 @@ class PvPLifePlayerScript : public PlayerScript
 {
 public:
     PvPLifePlayerScript()
-        : PlayerScript("PvPLifePlayerScript", { PLAYERHOOK_ON_LOGOUT })
+        : PlayerScript("PvPLifePlayerScript", { PLAYERHOOK_ON_LOGOUT, PLAYERHOOK_ON_DUEL_END })
     {
     }
 
     void OnPlayerLogout(Player* player) override
     {
         sPvPLifeMgr.OnPlayerLogout(player);
+    }
+
+    void OnPlayerDuelEnd(Player* winner, Player* loser, DuelCompleteType type) override
+    {
+        if (type == DUEL_WON)
+            sPvPLifeMgr.QueueDuelEnd(winner, loser);
     }
 };
 

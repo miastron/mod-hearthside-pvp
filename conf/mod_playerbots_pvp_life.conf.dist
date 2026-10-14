@@ -387,6 +387,22 @@ PvPLife.Duel.IdleFidget.MinSeconds = 6
 PvPLife.Duel.IdleFidget.MaxSeconds = 20
 
 #
+#   PvPLife.DuelMedics.Enable / MedicPercent / Chance / MaxPerDuel / Radius
+#       Description: An idle healer duelist (Holy/Discipline priest, Holy paladin, Restoration shaman or
+#                    druid) now and then heals the duelists of a duel that just ended in front of it, real
+#                    players' duels included. Only MedicPercent of healers ever do it (fixed per bot, so it
+#                    is the same few), only within Radius yards with the duel in front of them, and only on
+#                    Chance of the duels. MaxPerDuel medics at most per duel: the first heals the loser,
+#                    a second the winner. City Life's spectators do the same (CityLife.DuelMedics.*).
+#       Default:     1 (Enabled), 30, 50, 1, 30
+#
+PvPLife.DuelMedics.Enable = 1
+PvPLife.DuelMedics.MedicPercent = 30
+PvPLife.DuelMedics.Chance = 50
+PvPLife.DuelMedics.MaxPerDuel = 1
+PvPLife.DuelMedics.Radius = 30
+
+#
 #   PvPLife.Footwork.Duels / PvPLife.Footwork.WorldPvP
 #       Description: Make leased bots move like players while fighting a player, by class and spec
 #                    (src/PvPLifeFootwork.h, from docs/duel-tactics-3.3.5a.md). Casters stand and cast and
@@ -438,9 +454,8 @@ PvPLife.Footwork.Trace = 0
 #
 #   PvPLife.Antics.Enable
 #       Description: Between bouts an idle bot on a duel ground now and then plays out an antic: Dance
-#                    (/dance), Strafe (quick side-to-side steps, facing fixed), HopBackForth (hops forward
-#                    and back, backpedalling or turning round between hops), HopSideToSide (strafe hops)
-#                    or BunnyHop (hop after hop round a circle, a figure 8 or a zigzag). It stops at once
+#                    (/dance), HopBackForth (hops forward and back, backpedalling or turning round
+#                    between hops), HopSideToSide (strafe hops) or BunnyHop (hop after hop round a circle, a figure 8 or a zigzag). It stops at once
 #                    when the bot is picked for a duel, fights, is released or mod-playerbots pauses it.
 #                    The code is mod-hearthside-city's src/LifeMotion.h, shared with City Life's
 #                    CityLife.Antics.*. Test one with .pvplife debug antic <name> <antic>.
@@ -484,15 +499,12 @@ PvPLife.Antics.HopDismount.Chance = 35
 #   PvPLife.Antics.<Antic>.Weight / MinSeconds / MaxSeconds
 #       Description: Per antic: relative odds of being picked (0 = never, at most 1000) and how long it
 #                    lasts, in seconds.
-#       Default:     Weight 20 each; Dance 30-60, Strafe 5-10, HopBackForth 5-10, HopSideToSide 5-10,
+#       Default:     Weight 20 each; Dance 30-60, HopBackForth 5-10, HopSideToSide 5-10,
 #                    BunnyHop 15-30
 #
 PvPLife.Antics.Dance.Weight = 20
 PvPLife.Antics.Dance.MinSeconds = 30
 PvPLife.Antics.Dance.MaxSeconds = 60
-PvPLife.Antics.Strafe.Weight = 20
-PvPLife.Antics.Strafe.MinSeconds = 5
-PvPLife.Antics.Strafe.MaxSeconds = 10
 PvPLife.Antics.HopBackForth.Weight = 20
 PvPLife.Antics.HopBackForth.MinSeconds = 5
 PvPLife.Antics.HopBackForth.MaxSeconds = 10

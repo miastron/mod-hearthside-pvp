@@ -406,6 +406,7 @@ namespace PvPLife
             defaults.ChancePerMinute = 30;
             _antics = LifeMotion::LoadAnticConfig("PvPLife.Antics", defaults);
         }
+        _medics = LifeMedic::LoadConfig("PvPLife.DuelMedics");
         _challengeRealPlayers = sConfigMgr->GetOption<bool>("PvPLife.Duel.ChallengeRealPlayers", true);
         _realPlayerChallengeChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Duel.PlayerChallengeChance", 25));
         _realPlayerScanRadius = std::min<uint32>(1000, sConfigMgr->GetOption<uint32>("PvPLife.Duel.PlayerScanRadius", 55));
@@ -2227,6 +2228,64 @@ namespace PvPLife
         else
             bot->SetFacingTo(frand(0.0f, 2.0f * float(M_PI)));
         return true;
+    }
+
+    void Manager::QueueDuelEnd(Player* winner, Player* loser)
+    {
+        if (!_medics.Enable || !winner || !loser)
+            return;
+        std::lock_guard<std::mutex> lock(_duelEndMutex);
+        if (_duelEnds.size() < 64)
+            _duelEnds.push_back(LifeMedic::MakeDuelEnd(winner, loser));
+    }
+
+    void Manager::UpdateDuelMedics()
+    {
+        std::vector<LifeMedic::DuelEnd> ends;
+        {
+            std::lock_guard<std::mutex> lock(_duelEndMutex);
+            ends.swap(_duelEnds);
+        }
+        uint32 now = uint32(NowMs());
+        for (LifeMedic::DuelEnd const& end : ends)
+        {
+            // Idle duelists of this map's duel grounds: not dueling, not queued for one, not mid-antic.
+            std::vector<Player*> candidates;
+            for (ActiveEvent const& event : _activeEvents)
+            {
+                if (event.Closing || !event.FullyPrepared || event.EventZone.Type != ActivityType::Duel ||
+                    event.EventZone.MapId != end.MapId)
+                    continue;
+                for (Participant const& participant : event.Members)
+                {
+                    uint32 guid = participant.Bot.GuidLow;
+                    Player* bot = FindPlayer(guid);
+                    if (!bot || !participant.Deployed || !PlayerbotsLife::ValidateActiveLease(participant.Token) ||
+                        IsHumanControlled(bot) || !BotActive(bot) || AnticRunning(guid) ||
+                        std::any_of(_duelQueue.begin(), _duelQueue.end(), [guid](DuelStep const& step)
+                            { return step.ChallengerGuidLow == guid || step.TargetGuidLow == guid; }))
+                        continue;
+                    candidates.push_back(bot);
+                }
+            }
+            for (LifeMedic::PendingHeal const& heal : LifeMedic::Plan(candidates, end, _medics, now))
+                _pendingHeals.push_back(heal);
+        }
+
+        for (auto it = _pendingHeals.begin(); it != _pendingHeals.end();)
+        {
+            if (!LifeMotion::Reached(now, it->DueMs))
+            {
+                ++it;
+                continue;
+            }
+            Player* healer = FindPlayer(it->HealerGuid);
+            Player* target = FindPlayer(it->TargetGuid);
+            if (healer && FindDuelGroundParticipant(it->HealerGuid) && !IsHumanControlled(healer) &&
+                LifeMedic::Heal(healer, target) && _footworkTrace)
+                AuditLog("MEDIC", "healer=" + healer->GetName() + " target=" + target->GetName());
+            it = _pendingHeals.erase(it);
+        }
     }
 
     void Manager::KeepDuelStrategies()
@@ -4771,6 +4830,7 @@ namespace PvPLife
             _anticTimerMs = 0;
             KeepDuelStrategies();
             UpdateAntics();
+            UpdateDuelMedics();
         }
         if (managementTick)
         {
@@ -4817,6 +4877,8 @@ namespace PvPLife
             [](auto const& entry) { return LifeMotion::Running(entry.second); }));
         handler->PSendSysMessage("Antics: enabled={} running={} chance={}%/min cooldown={}s hopDismount={}%",
             _antics.Enable ? 1 : 0, anticsRunning, _antics.ChancePerMinute, _antics.CooldownSeconds, _antics.HopDismountChance);
+        handler->PSendSysMessage("Duel medics: enabled={} medics={}% of healers chance={}% max={} radius={} pending={}",
+            _medics.Enable ? 1 : 0, _medics.MedicPercent, _medics.Chance, _medics.MaxPerDuel, _medics.Radius, _pendingHeals.size());
 
         handler->PSendSysMessage("Audit: linesWritten={} dropped={} openFailures={} writeFailures={} inQueue={}",
             sPvPLifeAudit.GetLinesWritten(), sPvPLifeAudit.GetDroppedCount(),
@@ -5409,7 +5471,7 @@ namespace PvPLife
             if (!p || !FindDuelGroundParticipant(p->GetGUID().GetCounter()))
                 handler->PSendSysMessage("'{}' is not a bot on a duel ground right now.", args[2]);
             else if (kind == LifeMotion::Antic::None || kind == LifeMotion::Antic::HopDismount)
-                handler->PSendSysMessage("Antics: Dance, Strafe, HopBackForth, HopSideToSide, BunnyHop.");
+                handler->PSendSysMessage("Antics: Dance, HopBackForth, HopSideToSide, BunnyHop.");
             else if (p->duel || p->IsInCombat() || !TryStartAntic(p, p->GetGUID().GetCounter(), kind))
                 handler->PSendSysMessage("{} is busy (dueling or fighting).", p->GetName());
             else
