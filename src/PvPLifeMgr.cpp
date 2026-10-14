@@ -8,8 +8,8 @@
 #include "PvPLifeDuelSelection.h"
 #include "PvPLifeDuelRequestPolicy.h"
 #include "PvPLifeFootwork.h"
-#include "../../mod-hearthside-city/src/LifeArrival.h"
-#include "LifeBotReservation.h"
+#include "../../mod-hearthside-life/src/LifeArrival.h"
+#include "../../mod-hearthside-life/src/LifeBotReservation.h"
 
 #include "AiFactory.h"
 #include "BattlefieldMgr.h"

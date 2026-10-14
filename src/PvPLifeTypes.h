@@ -8,8 +8,8 @@
 #define PVP_LIFE_TYPES_H
 
 #include "Define.h"
-#include "LifeBotReservation.h"
-#include "../../mod-hearthside-city/src/LifeBots.h"
+#include "../../mod-hearthside-life/src/LifeBotReservation.h"
+#include "../../mod-hearthside-life/src/LifeBots.h"
 #include <string>
 #include <vector>
 

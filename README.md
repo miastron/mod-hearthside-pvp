@@ -8,7 +8,7 @@ Created by **iCore**. Incorporates 100% of capabilities from `mod-playerbots-wor
 
 An AzerothCore + mod-playerbots module focused on making the open world feel alive through persistent, configurable bot PvP, world skirmishes, reactive raid defenses, and capital gate duel rituals.
 
-**Single Installed Module Requirement:** Users install only this module alongside AzerothCore and `mod-playerbots`. `mod-playerbots-world-pvp` is completely unnecessary and should not be installed or enabled.
+**Requires `mod-hearthside-life`:** install it beside this module. It holds the code and state PvP Life shares with City Life (reservations, motion, bot identity, presence, arrivals, medics, audit). `mod-playerbots-world-pvp` is completely unnecessary and should not be installed or enabled.
 
 ---
 
@@ -42,9 +42,10 @@ An AzerothCore + mod-playerbots module focused on making the open world feel ali
 
 ## Installation & Setup
 
-1. Place `mod-hearthside-pvp` into your `modules/` folder:
+1. Place `mod-hearthside-pvp` and `mod-hearthside-life` into your `modules/` folder:
    ```text
    azerothcore-wotlk/modules/mod-hearthside-pvp
+   azerothcore-wotlk/modules/mod-hearthside-life
    ```
 2. Nothing to apply by hand: AzerothCore's updater applies `data/sql/db-world/base/pvp_life.sql`
    to the **WORLD** database on the next worldserver start (`Updates.EnableDatabases` must include
@@ -63,7 +64,7 @@ PvP Life and City Life are architected for seamless, zero-conflict simultaneous 
 - **Concurrent Capital Gate Duels:** Both modules host dueling outside city gates simultaneously. Each module pairs only its own reserved bots.
 - **Natural Hostility:** Standard core PvP hostility rules apply everywhere.
 - **Candidate Scanning Isolation:** During bot recruitment, each module verifies `!PlayerbotsLife::IsReserved(guid)` before claiming participants.
-- **Thread-Safe Shared Reservations:** `src/LifeBotReservation.h` provides atomic module flags and mutex-guarded ownership checks backed by one registry per process. Check `.pvplife compat`: every Life module must report the same protocol version and registry address (relevant when building with `MODULES=dynamic`).
+- **Thread-Safe Shared Reservations:** `mod-hearthside-life`'s `src/LifeBotReservation.h` provides atomic module flags and mutex-guarded ownership checks backed by one registry per process. Check `.pvplife compat`: every Life module must report the same protocol version and registry address (relevant when building with `MODULES=dynamic`).
 
 ---
 

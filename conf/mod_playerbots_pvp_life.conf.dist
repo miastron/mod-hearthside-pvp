@@ -533,7 +533,7 @@ PvPLife.Footwork.Trace = 0
 #                    (/dance), HopBackForth (hops forward and back, backpedalling or turning round
 #                    between hops), HopSideToSide (strafe hops) or BunnyHop (hop after hop round a circle, a figure 8 or a zigzag). It stops at once
 #                    when the bot is picked for a duel, fights, is released or mod-playerbots pauses it.
-#                    The code is mod-hearthside-city's src/LifeMotion.h, shared with City Life's
+#                    The code is mod-hearthside-life's src/LifeMotion.h, shared with City Life's
 #                    CityLife.Antics.*. Test one with .pvplife debug antic <name> <antic>.
 #       Default:     1 (Enabled)
 #

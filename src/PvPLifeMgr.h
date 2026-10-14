@@ -8,17 +8,17 @@
 #define PVP_LIFE_MGR_H
 
 #include "PvPLifeTypes.h"
-// The movement primitive and idle antics are City Life's (one copy for both modules), so this
-// module needs mod-hearthside-city checked out beside it.
-#if __has_include("../../mod-hearthside-city/src/LifeMotion.h")
-#include "../../mod-hearthside-city/src/LifeMotion.h"
+// The shared Life headers (movement, medics, bot identity, presence, audit) and their one
+// registry are mod-hearthside-life's, so this module needs it checked out beside it.
+#if __has_include("../../mod-hearthside-life/src/LifeMotion.h")
+#include "../../mod-hearthside-life/src/LifeMotion.h"
 #else
-#error "mod-hearthside-pvp requires mod-hearthside-city beside it in modules/ (for its LifeMotion.h)"
+#error "mod-hearthside-pvp requires mod-hearthside-life beside it in modules/"
 #endif
-#include "../../mod-hearthside-city/src/LifeMedic.h"
-#include "../../mod-hearthside-city/src/LifeBots.h"
-#include "../../mod-hearthside-city/src/LifePresence.h"
-#include "../../mod-hearthside-city/src/LifeAudit.h"
+#include "../../mod-hearthside-life/src/LifeMedic.h"
+#include "../../mod-hearthside-life/src/LifeBots.h"
+#include "../../mod-hearthside-life/src/LifePresence.h"
+#include "../../mod-hearthside-life/src/LifeAudit.h"
 #include "AsyncCallbackProcessor.h"
 #include "Position.h"
 #include "QueryCallback.h"

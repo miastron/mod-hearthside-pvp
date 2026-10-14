@@ -58,31 +58,28 @@ world thread.
   `PvPLife.Duel.WindDown.*`), then stays quiet a random while (`_duelQuietUntil`).
 - `src/PvPLifeTypes.h`: the plain data structs (`Zone`, `ActiveEvent`, `Participant`, queue steps)
   and enums.
-- `src/LifeBotReservation.h`: header-only, process-wide registry shared with sibling "Life" modules
-  (`mod-hearthside-city`, `mod-playerbots-artisans`). It provides lease tokens (generation-checked,
+- **The shared Life headers are `../mod-hearthside-life`'s** (moved there 2026-10-14). This module
+  includes them as `../../mod-hearthside-life/src/<header>` and `PvPLifeMgr.h` `#error`s without
+  that module. Change them in the Life repo and check City and PvP both build. There is no copy here.
+- `LifeBotReservation.h` (Life): process-wide registry shared with sibling "Life" modules
+  (`mod-hearthside-city`, `mod-playerbots-artisans`), defined once in Life's `LifeRegistry.cpp`. It provides lease tokens (generation-checked,
   Provisional → Active → Releasing → Released), duel staging slots on a shared 20yd lattice, the
   real-player challenge cooldowns, and admission requests. Every queued step carries a `LeaseToken`
   and re-validates it before acting (`CanExecuteStep`, `IsOwnedActor`), because the other module may
-  have claimed the bot in between. **This file must stay byte-identical to the copy in
-  `../mod-hearthside-city/src/`** (mod-playerbots-artisans includes City's copy directly). Bump
-  `LIFE_BOT_RESERVATION_PROTOCOL_VERSION` on any change: `AddPvPLifeScripts()` calls
-  `CheckProtocolVersion()`, which logs an error when another Life module registered a different
-  version. Change both repos together.
+  have claimed the bot in between. `AddPvPLifeScripts()` calls `CheckProtocolVersion()`, now only a
+  startup sanity check against a module built from an old copy.
 - `src/PvPLifeDuelSelection.h`, `src/PvPLifeDuelRequestPolicy.h`: small pure-logic helpers for duel
   pairing and request rules.
-- `../mod-hearthside-city/src/LifeMotion.h` (City owns it; `PvPLifeMgr.h` includes it by relative
-  path and `#error`s without it, so this module now needs City checked out beside it):
+- `LifeMotion.h` (Life):
   `LifeMotion::Launch` is the validated jump/curve move under duel footwork (`FootworkStep`,
   `FootworkBound` is its `Bound`), and the antic `Routine`s are the idle duel-ground antics
-  (`UpdateAntics` every ~100 ms, `PvPLife.Antics.*`, `.pvplife debug antic <name> <antic>`). Change
-  it in the City repo; it is not copied here. `../mod-hearthside-city/src/LifeMedic.h` is included
-  the same way: healer duelists heal the duelists of a duel that just ended in front of them
+  (`UpdateAntics` every ~100 ms, `PvPLife.Antics.*`, `.pvplife debug antic <name> <antic>`).
+  `LifeMedic.h` (Life): healer duelists heal the duelists of a duel that just ended in front of them
   (`OnPlayerDuelEnd` → `QueueDuelEnd` → `UpdateDuelMedics`, `PvPLife.DuelMedics.*`).
-- The other City-owned shared headers, included the same way (one copy for both modules; change
-  them in the City repo and check both build):
+- The other shared Life headers:
   - `LifeBots.h`: bot-account filter (`_accounts`, behind `IsBotSession`/`IsHumanPlayer`/
     `IsHumanControlled`), archetype filter, budget math, live-bot census, the strategy journal and
-    `HoldLevels` (the level freeze behind `KeepLeasedLevelsFixed`, one registry for both modules).
+    `HoldLevels` (the level freeze behind `KeepLeasedLevelsFixed`, one registry in Life's `LifeRegistry.cpp`).
   - `LifePresence.h`: the real-player snapshot (`_presence`) and mod-playerbots' wake rule
     (`PlayerPresent`), plus `Watched` (`RealPlayerWatching`).
   - `LifeArrival.h`: `FindDropOff` (under `MoveBot` with `PvPLife.Movement.DropOffArrival`) and
@@ -96,7 +93,7 @@ world thread.
   (account-based), not `IsRealPlayer()` alone: mod-playerbots attaches its AI after
   `OnPlayerLogin`, so a logging-in bot otherwise reads as human.
 - **Archetype filter:** if `hs_archetype.h` from `../mod-hearthside-chat` is on the include path,
-  City's `LifeBots.h` defines `LIFEBOTS_HAS_ARCHETYPES` and `PvPLife.Bots.Archetypes` restricts which
+  Life's `LifeBots.h` defines `LIFEBOTS_HAS_ARCHETYPES` and `PvPLife.Bots.Archetypes` restricts which
   bots may be borrowed (`Manager::FitsArchetype`). Without that module every bot fits; keep the code
   compiling both ways.
 - Bots are borrowed as-is (no level, talent or gear changes), GMs are never challenged or yelled at,
