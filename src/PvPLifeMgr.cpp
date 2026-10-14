@@ -2168,9 +2168,8 @@ namespace PvPLife
                 continue;
             Player* bot = FindPlayer(guid);
             Participant const* participant = FindDuelGroundParticipant(guid);
-            // A bot mod-playerbots pauses (BotActiveAlone) starts no new antic, but one under way plays
-            // out: pauses come and go in 30-second slices and would cut nearly every antic short.
-            bool going = bot && participant && !IsHumanControlled(bot);
+            bool going = bot && participant && !IsHumanControlled(bot) &&
+                (routine.Kind == LifeMotion::Antic::HopDismount || BotActive(bot));
             if (going)
             {
                 // Stay clear of the neighbouring staging spots (20 yards apart) and their duels.
