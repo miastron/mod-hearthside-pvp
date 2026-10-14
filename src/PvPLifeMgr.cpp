@@ -430,6 +430,18 @@ namespace PvPLife
         _botChallengeCooldownSeconds = std::min<uint32>(MaxCooldownSeconds, sConfigMgr->GetOption<uint32>("PvPLife.Duel.BotChallengeCooldownSeconds", 180));
         _botDuelCooldownSeconds = std::min<uint32>(MaxCooldownSeconds, sConfigMgr->GetOption<uint32>("PvPLife.Duel.BotVsBotCooldownSeconds", 45));
         _botDuelMaxLevelDifference = std::min<uint32>(80, sConfigMgr->GetOption<uint32>("PvPLife.Duel.BotVsBotMaxLevelDifference", 2));
+        _windDownEnable = sConfigMgr->GetOption<bool>("PvPLife.Duel.WindDown.Enable", true);
+        _windDownIntervalMin = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.WindDown.IntervalMinSeconds", 30), 5, 3600);
+        _windDownIntervalMax = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.WindDown.IntervalMaxSeconds", 150), _windDownIntervalMin, 3600);
+        _windDownLingerMin = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.WindDown.LingerMinSeconds", 60), 0, 3600);
+        _windDownLingerMax = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.WindDown.LingerMaxSeconds", 300), _windDownLingerMin, 3600);
+        _windDownMaxSeconds = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.WindDown.MaxSeconds", 900), 60, 7200);
+        _duelQuietMin = std::min<uint32>(MaxCooldownSeconds, sConfigMgr->GetOption<uint32>("PvPLife.Duel.QuietMinSeconds", 30));
+        _duelQuietMax = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.QuietMaxSeconds", 1200), _duelQuietMin, MaxCooldownSeconds);
+        _boredChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Duel.Bored.Chance", 35));
+        _boredAfterSeconds = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.Bored.AfterSeconds", 240), 30, 3600);
+        _boredMultiplierMin = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.Bored.MultiplierMin", 2), 1, 10);
+        _boredMultiplierMax = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.Bored.MultiplierMax", 4), _boredMultiplierMin, 10);
 
         // 6. Campaigns & Chatter
         _forTheHordeEnable = sConfigMgr->GetOption<bool>("PvPLife.ForTheHorde.Enable", true);
@@ -471,15 +483,6 @@ namespace PvPLife
         _maxTotal = sConfigMgr->GetOption<uint32>("PvPLife.Population.MaxTotal", 120);
         if (_maxTotal > 1000)
             _maxTotal = 1000;
-        std::string demandModeStr = Lower(sConfigMgr->GetOption<std::string>("PvPLife.Population.DemandMode", "hybrid"));
-        if (demandModeStr == "fixed")
-            _demandMode = DemandMode::Fixed;
-        else if (demandModeStr == "dynamic")
-            _demandMode = DemandMode::Dynamic;
-        else
-            _demandMode = DemandMode::Hybrid;
-        _baselinePercent = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Population.BaselinePercent", 20), 1, 100);
-        _burstGraceSeconds = sConfigMgr->GetOption<uint32>("PvPLife.Population.BurstGraceSeconds", 180);
         _maxChangesPerTick = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Population.MaxChangesPerTick", 3), 1, 20);
         _proportionalZoneScaling = sConfigMgr->GetOption<bool>("PvPLife.Population.ProportionalZoneScaling", true);
 
@@ -1003,6 +1006,9 @@ namespace PvPLife
                     return;
             }
         }
+        // Likewise in a battleground: AcceptBattlegroundInvitationAction reset them on the way in.
+        if (player->InBattleground())
+            return;
 
         if (player->IsPvP() == journal.AppliedPvPFlag && player->IsPvP() != journal.OriginalPvPFlag)
             player->SetPvP(journal.OriginalPvPFlag);
@@ -1115,7 +1121,7 @@ namespace PvPLife
             player->GetMap() && !player->GetMap()->Instanceable();
     }
 
-    void Manager::DisengageParticipant(uint32 guidLow)
+    void Manager::DisengageParticipant(uint32 guidLow, bool returnHome)
     {
         for (ActiveEvent& event : _activeEvents)
         {
@@ -1131,7 +1137,7 @@ namespace PvPLife
             Participant departing = *it;
             event.Members.erase(it);
             if (leased)
-                QueueParticipantRelease(departing, false);
+                QueueParticipantRelease(departing, returnHome);
             event.DuelPairs.erase(std::remove_if(event.DuelPairs.begin(), event.DuelPairs.end(),
                 [guidLow](DuelPair const& pair) { return pair.ChallengerGuidLow == guidLow || pair.TargetGuidLow == guidLow; }),
                 event.DuelPairs.end());
@@ -1349,7 +1355,6 @@ namespace PvPLife
             return;
 
         std::vector<RealPlayerSnapshotEntry> snapshot;
-        uint32 nowSec = GameTimeSeconds();
         {
             std::shared_lock<std::shared_mutex> playerLock(*HashMapHolder<Player>::GetLock());
             for (auto const& entry : ObjectAccessor::GetPlayers())
@@ -1357,9 +1362,6 @@ namespace PvPLife
                 Player* player = entry.second;
                 if (!player || !player->IsInWorld() || !IsHumanPlayer(player))
                     continue;
-                // Real-player presence per zone for Population.DemandMode; GMs do not count.
-                if (!player->IsGameMaster())
-                    _zoneLastRealPlayerTime[player->GetZoneId()] = nowSec;
 
                 RealPlayerSnapshotEntry rpe;
                 rpe.GuidLow = player->GetGUID().GetCounter();
@@ -1377,6 +1379,7 @@ namespace PvPLife
                 rpe.InCombat = player->IsInCombat();
                 rpe.HasDuel = (player->duel != nullptr);
                 rpe.IsGameMaster = player->IsGameMaster();
+                rpe.HiddenGm = player->IsGameMaster() && !player->isGMVisible();
                 rpe.Security = player->GetSession()->GetSecurity();
 
                 Group* group = player->GetGroup();
@@ -1438,7 +1441,35 @@ namespace PvPLife
         return std::clamp<uint32>(budget, 1, upper);
     }
 
-    void Manager::CalculatePopulation(Zone const& zone, uint32& attackerCount, uint32& defenderCount) const
+    bool Manager::PlayerPresent(Zone const& zone) const
+    {
+        bool checkMap = sPlayerbotAIConfig.BotActiveAloneForceWhenInMap;
+        bool checkZone = sPlayerbotAIConfig.BotActiveAloneForceWhenInZone;
+        float range = float(sPlayerbotAIConfig.BotActiveAloneForceWhenInRadius);
+        uint32 zoneId = 0;
+        if (checkZone)
+            zoneId = zone.ZoneId ? zone.ZoneId :
+                sMapMgr->GetZoneId(PHASEMASK_NORMAL, zone.MapId, zone.RallyX, zone.RallyY, zone.RallyZ);
+        UpdateRealPlayersSnapshot(); // throttled to every 3s
+        for (RealPlayerSnapshotEntry const& player : _cachedRealPlayers)
+        {
+            if (player.MapId != zone.MapId || player.HiddenGm)
+                continue;
+            if (checkMap || (checkZone && zoneId && player.ZoneId == zoneId))
+                return true;
+            if (range > 0.0f)
+            {
+                float dx = player.X - zone.RallyX;
+                float dy = player.Y - zone.RallyY;
+                if (dx * dx + dy * dy < range * range)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    void Manager::CalculatePopulation(Zone const& zone, uint32& attackerCount, uint32& defenderCount,
+        bool* budgetShort) const
     {
         uint32 minimumPopulation = std::clamp<uint32>(zone.PopulationMin, 1, _maxBotsPerSide * 2);
         uint32 maximumPopulation = std::clamp(zone.PopulationMax, minimumPopulation, _maxBotsPerSide * 2);
@@ -1454,31 +1485,9 @@ namespace PvPLife
 
         minimumPopulation = std::min(minimumPopulation, _maxBotsPerSide * 2);
         maximumPopulation = std::clamp(maximumPopulation, minimumPopulation, _maxBotsPerSide * 2);
+        // Sized from the zone row alone, whether or not anyone is near: an unwatched event is
+        // prepared in full and stays dormant until mod-playerbots wakes its bots (BotActiveAlone).
         uint32 totalPopulation = urand(minimumPopulation, maximumPopulation);
-
-        // DemandMode execution: Fixed, Dynamic, Hybrid
-        uint32 zoneId = zone.ZoneId ? zone.ZoneId : sMapMgr->GetZoneId(PHASEMASK_NORMAL, zone.MapId, zone.RallyX, zone.RallyY, zone.RallyZ);
-        if (_demandMode != DemandMode::Fixed && zoneId != 0)
-        {
-            UpdateRealPlayersSnapshot(); // refreshes the per-zone presence (throttled to every 3s)
-            uint32 nowSec = GameTimeSeconds();
-            bool hasRealPlayerPresence = false;
-            auto it = _zoneLastRealPlayerTime.find(zoneId);
-            if (it != _zoneLastRealPlayerTime.end() && SecondsSince(nowSec, it->second) <= _burstGraceSeconds)
-                hasRealPlayerPresence = true;
-
-            if (_demandMode == DemandMode::Dynamic && !hasRealPlayerPresence)
-            {
-                attackerCount = 0;
-                defenderCount = 0;
-                return;
-            }
-            else if (_demandMode == DemandMode::Hybrid && !hasRealPlayerPresence)
-            {
-                float baselineFactor = static_cast<float>(_baselinePercent) / 100.0f;
-                totalPopulation = std::max<uint32>(2, static_cast<uint32>(std::lround(totalPopulation * baselineFactor)));
-            }
-        }
 
         uint32 budget = CalculatePopulationBudget();
         uint32 currentActive = PlayerbotsLife::GetCooperationSnapshot().PvPLifeCount;
@@ -1486,13 +1495,19 @@ namespace PvPLife
         uint32 availableBudget = (budget > currentActive) ? (budget - currentActive) : 0;
         if (availableBudget < 2)
         {
+            if (budgetShort)
+                *budgetShort = true;
             attackerCount = 0;
             defenderCount = 0;
             return;
         }
 
         if (totalPopulation > availableBudget)
+        {
+            if (budgetShort)
+                *budgetShort = true;
             totalPopulation = availableBudget;
+        }
         if (totalPopulation < 2)
         {
             attackerCount = 0;
@@ -2145,7 +2160,15 @@ namespace PvPLife
         LifeMotion::Routine& routine = _anticRoutines[guidLow];
         if (kind == LifeMotion::Antic::None)
         {
-            if (!LifeMotion::Ready(routine, now) || !LifeMotion::RollAntic(_antics, _duelGuardIntervalMs))
+            // A bored bot rolls at a multiple of the rate and waits a fraction of the cooldown.
+            auto boredom = _boredom.find(guidLow);
+            uint32 bored = boredom != _boredom.end() && boredom->second > 1 ? boredom->second : 1;
+            LifeMotion::AnticConfig odds = _antics;
+            odds.ChancePerMinute = std::min<uint32>(100, odds.ChancePerMinute * bored);
+            uint32 cooldownMs = _antics.CooldownSeconds * 1000;
+            uint32 readyAt = routine.CooldownUntilMs - (cooldownMs - cooldownMs / bored);
+            if (LifeMotion::Running(routine) || !LifeMotion::Reached(now, readyAt) ||
+                !LifeMotion::RollAntic(odds, _duelGuardIntervalMs))
                 return false;
             kind = LifeMotion::PickAntic(_antics);
         }
@@ -2935,9 +2958,16 @@ namespace PvPLife
         for (ReleasingParticipant const& rp : _releasingParticipants)
             excluded.insert(rp.Part.Bot.GuidLow);
 
+        // A spot near a real player that is waiting for budget goes first: until it has started (or
+        // its claim lapses), spots nobody is near do not take the bots that free up.
+        bool present = PlayerPresent(eventZone);
+        if (!forced && !present && GameTimeSeconds() < _presenceWaitingUntil)
+            return false;
+
         uint32 attackerNeed = 0;
         uint32 defenderNeed = 0;
-        CalculatePopulation(eventZone, attackerNeed, defenderNeed);
+        bool budgetShort = false;
+        CalculatePopulation(eventZone, attackerNeed, defenderNeed, &budgetShort);
         uint8 effMinLevel = EffectiveMinLevel(eventZone.MinLevel, eventZone.Type);
         std::vector<BotCandidate> attackerPool =
             LoadCandidates(eventZone.AttackerTeam, effMinLevel, eventZone.MaxLevel, excluded, attackerNeed);
@@ -3005,6 +3035,12 @@ namespace PvPLife
         if (attackers.size() < requiredAttackers || defenders.size() < requiredDefenders ||
             (attackers.size() + defenders.size()) < requiredTotal)
         {
+            if (budgetShort && present && !forced)
+            {
+                _presenceWaitingUntil = now + 2 * _tickSeconds + 5;
+                if (_debug)
+                    AuditLog("PRIORITY", "spot=" + zone.Name + " waits for budget near a player");
+            }
             if (_debug)
                 LOG_INFO("module", "[PvPLife] '{}' lacks bots: attackers {}/{} defenders {}/{} total {} (min required {})",
                     zone.Name, attackers.size(), attackerNeed, defenders.size(), defenderNeed,
@@ -3049,8 +3085,9 @@ namespace PvPLife
             uint32 numPairs = static_cast<uint32>(std::min(attackers.size(), defenders.size()));
             numPairs = std::min(numPairs, _duelPairLimit);
             // The registry clamps the duration below 2^31 ms; compute it without uint32 overflow.
+            // The slots outlast the timer by the longest wind-down, when the last duelists still stand on them.
             uint32 eventDurationMs = static_cast<uint32>(std::min<uint64>(
-                uint64(event.EndsAt - now) * IN_MILLISECONDS, 0x7FFFFFFFu));
+                uint64(event.EndsAt - now + (_windDownEnable ? _windDownMaxSeconds : 0)) * IN_MILLISECONDS, 0x7FFFFFFFu));
 
             for (uint32 i = 0; i < numPairs; ++i)
             {
@@ -3254,6 +3291,8 @@ namespace PvPLife
         // Clear any queued bot-directed steps for this departing participant immediately (PVP-01)
         uint32 guid = part.Bot.GuidLow;
         StopAntic(guid);
+        _boredom.erase(guid);
+        _lastDuelAt.erase(guid);
         _moveQueue.erase(std::remove_if(_moveQueue.begin(), _moveQueue.end(),
             [guid](MoveStep const& s) { return s.GuidLow == guid; }), _moveQueue.end());
         EraseDuelSteps([guid](DuelStep const& s) { return s.ChallengerGuidLow == guid || s.TargetGuidLow == guid; });
@@ -3294,6 +3333,12 @@ namespace PvPLife
             QueueParticipantRelease(part, _returnBots);
         // Every staging slot this event claimed carries its id; the duelists are leaving.
         PlayerbotsLife::ReleaseDuelStagingSlotByActivity(id, PlayerbotsLife::ReservationOwner::PvPLife);
+        // A duel ground that ran its course stays quiet a while, sometimes briefly, sometimes long.
+        // Not after a reload, a GM stop or a shutdown.
+        bool ranItsCourse = reason == "timer" || reason == "wound-down" || reason == "duel-population";
+        if (ranItsCourse && event.EventZone.Type == ActivityType::Duel && event.Origin == EventOrigin::Zone &&
+            event.FullyPrepared)
+            _duelQuietUntil[event.EventZone.Id] = GameTimeSeconds() + urand(_duelQuietMin, _duelQuietMax);
         LOG_INFO("module", "[PvPLife] END #{} {} reason={}", id, event.EventZone.Name, reason);
         AuditLog("END", "event=" + std::to_string(id) + " reason=" + reason);
     }
@@ -3417,8 +3462,20 @@ namespace PvPLife
         {
             if (event.Closing)
                 continue;
+            if (event.FullyPrepared && event.EventZone.Type == ActivityType::Duel)
+                ReleaseLeavers(event, now);
+            if (event.WindingDown)
+            {
+                UpdateWindDown(event, now);
+                continue;
+            }
             if (event.EndsAt <= now)
             {
+                if (CanWindDown(event))
+                {
+                    StartWindDown(event, now);
+                    continue;
+                }
                 // Let the duels under way finish (up to two minutes) rather than cut them off.
                 if (event.EventZone.Type == ActivityType::Duel && now < event.EndsAt + 120 &&
                     std::any_of(event.Members.begin(), event.Members.end(), [this](Participant const& part)
@@ -3429,7 +3486,7 @@ namespace PvPLife
                     continue;
                 EndEvent(event, "timer");
             }
-            else if (event.FullyPrepared && event.EventZone.Type == ActivityType::Duel)
+            else if (event.FullyPrepared && event.EventZone.Type == ActivityType::Duel && !event.Closing)
             {
                 // A bot mid-teleport is briefly out of the world but still taking part.
                 uint32 alive = 0;
@@ -3443,6 +3500,138 @@ namespace PvPLife
         }
         _activeEvents.erase(std::remove_if(_activeEvents.begin(), _activeEvents.end(),
             [](ActiveEvent const& event) { return event.Closing; }), _activeEvents.end());
+    }
+
+    bool Manager::DuelIdle(Player* bot, uint32 guidLow) const
+    {
+        if (!bot || !bot->IsInWorld())
+            return true; // gone already: the release cleans up
+        if (bot->duel || bot->IsInCombat() || bot->IsBeingTeleported() || AnticRunning(guidLow) ||
+            _pendingWalks.count(guidLow))
+            return false;
+        return std::none_of(_duelQueue.begin(), _duelQueue.end(), [guidLow](DuelStep const& step)
+            { return step.ChallengerGuidLow == guidLow || step.TargetGuidLow == guidLow; });
+    }
+
+    void Manager::RollBoredom(uint32 guidLow)
+    {
+        _boredom[guidLow] = urand(1, 100) <= _boredChance ? urand(_boredMultiplierMin, _boredMultiplierMax) : 0;
+        if (_debug && _boredom[guidLow] > 1)
+            AuditLog("BORED", "guid=" + std::to_string(guidLow) + " antics x" + std::to_string(_boredom[guidLow]));
+    }
+
+    void Manager::StartLinger(ActiveEvent& event, Participant const& departing, uint32 now)
+    {
+        if (!departing.PairId)
+            return;
+        for (Participant& partner : event.Members)
+        {
+            if (partner.PairId != departing.PairId || partner.Bot.GuidLow == departing.Bot.GuidLow || partner.LeaveAt)
+                continue;
+            partner.LeaveAt = now + urand(_windDownLingerMin, _windDownLingerMax);
+            // Left standing there, some get restless.
+            RollBoredom(partner.Bot.GuidLow);
+            AuditLog("LINGER", "event=" + std::to_string(event.EventId) + " bot=" + partner.Bot.Name +
+                " partner=" + departing.Bot.Name + " seconds=" + std::to_string(partner.LeaveAt - now));
+        }
+    }
+
+    void Manager::ReleaseLeavers(ActiveEvent& event, uint32 now)
+    {
+        std::vector<Participant> calledAway;
+        std::vector<uint32> lingered;
+        for (Participant const& part : event.Members)
+        {
+            if (!part.Deployed)
+                continue;
+            Player* bot = FindPlayer(part.Bot.GuidLow);
+            // mod-playerbots queued it and the queue popped (its own "bg"/"lfg" strategies): someone
+            // called away to a battleground or a dungeon. It goes, wherever it is now.
+            if (bot && bot->IsInWorld() && (bot->InBattleground() || (bot->GetMap() && bot->GetMap()->Instanceable())))
+                calledAway.push_back(part);
+            else if (part.LeaveAt && now >= part.LeaveAt && DuelIdle(bot, part.Bot.GuidLow))
+                lingered.push_back(part.Bot.GuidLow);
+        }
+        for (Participant const& part : calledAway)
+        {
+            AuditLog("CALLED_AWAY", "event=" + std::to_string(event.EventId) + " bot=" + part.Bot.Name);
+            DisengageParticipant(part.Bot.GuidLow, false);
+            StartLinger(event, part, now);
+        }
+        for (uint32 guid : lingered)
+        {
+            AuditLog("LEAVE", "event=" + std::to_string(event.EventId) + " guid=" + std::to_string(guid) + " lingered");
+            DisengageParticipant(guid, _returnBots);
+        }
+    }
+
+    bool Manager::CanWindDown(ActiveEvent const& event) const
+    {
+        return _windDownEnable && event.EventZone.Type == ActivityType::Duel && event.Origin == EventOrigin::Zone &&
+            event.FullyPrepared && !event.Members.empty() && PlayerPresent(event.EventZone);
+    }
+
+    void Manager::StartWindDown(ActiveEvent& event, uint32 now)
+    {
+        event.WindingDown = true;
+        // EndsAt becomes the hard cap: every "EndsAt > now" check keeps the steps running until then.
+        event.EndsAt = now + _windDownMaxSeconds;
+        event.NextDepartureAt = now + urand(5, _windDownIntervalMin);
+        // mod-playerbots' own random teleport was held off until the timer; hold it to the cap.
+        for (Participant const& part : event.Members)
+            if (Player* bot = FindPlayer(part.Bot.GuidLow); bot && sRandomPlayerbotMgr.IsRandomBot(bot))
+                sRandomPlayerbotMgr.ScheduleTeleport(part.Bot.GuidLow, _windDownMaxSeconds + 60);
+        LOG_INFO("module", "[PvPLife] WIND DOWN #{} {} bots={}", event.EventId, event.EventZone.Name, event.Members.size());
+        AuditLog("WINDDOWN", "event=" + std::to_string(event.EventId) + " spot=" + event.EventZone.Name +
+            " bots=" + std::to_string(event.Members.size()));
+    }
+
+    void Manager::UpdateWindDown(ActiveEvent& event, uint32 now)
+    {
+        if (event.Members.empty())
+        {
+            EndEvent(event, "wound-down");
+            return;
+        }
+        if (now >= event.EndsAt)
+        {
+            EndEvent(event, "timer");
+            return;
+        }
+        if (now < event.NextDepartureAt)
+            return;
+        // Everyone has gone out of range: nobody sees the rest leave, so they all go now.
+        if (!PlayerPresent(event.EventZone))
+        {
+            EndEvent(event, "timer");
+            return;
+        }
+
+        // The next to go: an idle bot, by preference one whose partner is still here and not already
+        // lingering, so the one left behind hangs about for a while before it goes too.
+        std::vector<Participant const*> idle;
+        std::vector<Participant const*> paired;
+        for (Participant const& part : event.Members)
+        {
+            if (part.LeaveAt || !DuelIdle(FindPlayer(part.Bot.GuidLow), part.Bot.GuidLow))
+                continue;
+            idle.push_back(&part);
+            if (part.PairId && std::any_of(event.Members.begin(), event.Members.end(), [&part](Participant const& other)
+                { return other.PairId == part.PairId && other.Bot.GuidLow != part.Bot.GuidLow && !other.LeaveAt; }))
+                paired.push_back(&part);
+        }
+        std::vector<Participant const*> const& pool = paired.empty() ? idle : paired;
+        if (pool.empty())
+        {
+            // Everyone busy (or already lingering): look again shortly.
+            event.NextDepartureAt = now + 5;
+            return;
+        }
+        Participant departing = *pool[urand(0, uint32(pool.size() - 1))];
+        event.NextDepartureAt = now + urand(_windDownIntervalMin, _windDownIntervalMax);
+        AuditLog("LEAVE", "event=" + std::to_string(event.EventId) + " bot=" + departing.Bot.Name + " wind-down");
+        DisengageParticipant(departing.Bot.GuidLow, _returnBots);
+        StartLinger(event, departing, now);
     }
 
     void Manager::ProcessMoveQueue()
@@ -3673,7 +3862,12 @@ namespace PvPLife
                 {
                     _botDuelCooldown[step.ChallengerGuidLow] = now + _botDuelCooldownSeconds;
                     _botDuelCooldown[step.TargetGuidLow] = now + _botDuelCooldownSeconds;
+                    _lastDuelAt[step.TargetGuidLow] = now;
+                    _boredom.erase(step.TargetGuidLow);
                 }
+                // A duel at last: no longer bored, and the wait starts over.
+                _lastDuelAt[step.ChallengerGuidLow] = now;
+                _boredom.erase(step.ChallengerGuidLow);
                 for (auto& pair : event->DuelPairs)
                 {
                     if (pair.PairId == step.PairId ||
@@ -3949,8 +4143,9 @@ namespace PvPLife
                 Player* bot = FindPlayer(guidLow);
                 if (IsHumanControlled(bot))
                     continue;
+                // Queued for a battleground: CanExecuteStep would drop any duel step for it.
                 if (!bot || !bot->IsAlive() || bot->IsBeingTeleported() || bot->duel || bot->IsInCombat() ||
-                    bot->IsInFlight() || bot->InBattleground())
+                    bot->IsInFlight() || bot->InBattleground() || bot->InBattlegroundQueue())
                     continue;
 
                 ApplyPvpStrategies(bot, true);
@@ -4170,6 +4365,15 @@ namespace PvPLife
                     bot->ClearUnitState(UNIT_STATE_FOLLOW);
                 }
 
+                // Long without a duel: once, a chance to turn restless (more antics, PvPLife.Duel.Bored.*).
+                if (!_boredom.count(participant.Bot.GuidLow))
+                {
+                    auto last = _lastDuelAt.find(participant.Bot.GuidLow);
+                    uint32 since = last != _lastDuelAt.end() ? last->second : event.StartedAt;
+                    if (SecondsSince(GameTimeSeconds(), since) >= _boredAfterSeconds)
+                        RollBoredom(participant.Bot.GuidLow);
+                }
+
                 // Between bouts, now and then an antic: a dance, a strafe, a few hops (PvPLife.Antics.*).
                 if (!bot->isMoving() && BotActive(bot) && TryStartAntic(bot, participant.Bot.GuidLow))
                     continue;
@@ -4375,13 +4579,20 @@ namespace PvPLife
             if (e.EventZone.Type == ActivityType::Duel)
                 activeIds.insert(e.EventZone.Id);
 
+        uint32 now = GameTimeSeconds();
         std::vector<Zone> zones = LoadZones(false, static_cast<int>(ActivityType::Duel));
+        zones.erase(std::remove_if(zones.begin(), zones.end(), [&](Zone const& z)
+        {
+            auto quiet = _duelQuietUntil.find(z.Id);
+            return activeIds.count(z.Id) != 0 || (quiet != _duelQuietUntil.end() && now < quiet->second);
+        }), zones.end());
+        // Grounds near a real player first, so they get the budget that is free.
+        std::stable_partition(zones.begin(), zones.end(), [this](Zone const& z) { return PlayerPresent(z); });
         for (Zone const& z : zones)
         {
             if (_maxActiveEvents > 0 && _activeEvents.size() >= _maxActiveEvents)
                 break;
-            if (activeIds.find(z.Id) == activeIds.end())
-                StartZone(z);
+            StartZone(z);
         }
     }
 
@@ -4875,7 +5086,7 @@ namespace PvPLife
                 PruneExpiredCooldowns();
                 PlayerbotsLife::PruneRealPlayerCooldowns(nowSec);
             }
-            UpdateRealPlayersSnapshot(); // keeps real-player presence current for DemandMode
+            UpdateRealPlayersSnapshot(); // keeps real-player presence current for start priority
             ProcessPreparingEvents();
             TryQueueReactiveRaidResponse();
             MaintainPersistentDuelZones();
@@ -4914,6 +5125,11 @@ namespace PvPLife
             _duelMatchup[0][0], _duelMatchup[0][1], _duelMatchup[1][1], _duelMatchup[0][2], _duelMatchup[2][2], _duelMatchup[1][2]);
         handler->PSendSysMessage("Duel medics: enabled={} medics={}% of healers chance={}% max={} radius={} pending={}",
             _medics.Enable ? 1 : 0, _medics.MedicPercent, _medics.Chance, _medics.MaxPerDuel, _medics.Radius, _pendingHeals.size());
+        handler->PSendSysMessage("Duel wind-down: enabled={} leave every {}-{}s linger {}-{}s cap={}s quiet {}-{}s; bored {}% after {}s x{}-{} (bored now={})",
+            _windDownEnable ? 1 : 0, _windDownIntervalMin, _windDownIntervalMax, _windDownLingerMin, _windDownLingerMax,
+            _windDownMaxSeconds, _duelQuietMin, _duelQuietMax, _boredChance, _boredAfterSeconds,
+            _boredMultiplierMin, _boredMultiplierMax,
+            std::count_if(_boredom.begin(), _boredom.end(), [](auto const& entry) { return entry.second > 1; }));
 
         handler->PSendSysMessage("Audit: linesWritten={} dropped={} openFailures={} writeFailures={} inQueue={}",
             sPvPLifeAudit.GetLinesWritten(), sPvPLifeAudit.GetDroppedCount(),
@@ -4929,11 +5145,21 @@ namespace PvPLife
         for (ActiveEvent const& e : _activeEvents)
         {
             uint32 left = e.EndsAt > now ? e.EndsAt - now : 0;
-            handler->PSendSysMessage("#{} {} [{}] origin={} level {}~{} bots={} time left={}m",
+            uint32 lingering = uint32(std::count_if(e.Members.begin(), e.Members.end(),
+                [](Participant const& part) { return part.LeaveAt != 0; }));
+            handler->PSendSysMessage("#{} {} [{}] origin={} level {}~{} bots={} lingering={} {}={}m near player={}",
                 e.EventId, e.EventZone.Name, TypeName(e.EventZone.Type),
                 e.Origin == EventOrigin::ReactiveRaidResponse ? "ReactiveDefense" : "Zone",
                 e.EventZone.MinLevel, e.EventZone.MaxLevel,
-                e.Members.size(), left / MINUTE);
+                e.Members.size(), lingering, e.WindingDown ? "winding down, cap in" : "time left",
+                left / MINUTE, PlayerPresent(e.EventZone) ? 1 : 0);
+        }
+        for (auto const& [zoneId, until] : _duelQuietUntil)
+        {
+            if (until <= now)
+                continue;
+            auto zone = std::find_if(_zoneCache.begin(), _zoneCache.end(), [zoneId = zoneId](Zone const& z) { return z.Id == zoneId; });
+            handler->PSendSysMessage("[Quiet] {} for {}s more", zone != _zoneCache.end() ? zone->Name : std::to_string(zoneId), until - now);
         }
 
         for (PendingRaidResponse const& p : _pendingResponses)

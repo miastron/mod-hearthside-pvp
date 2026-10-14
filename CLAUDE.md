@@ -50,6 +50,10 @@ world thread.
   maintenance, real-player challenges). Bots are released through a phased
   `_releasingParticipants` queue that runs even while disabled or reloading, restoring captured AI
   state (`AIStateJournal`). `_maxChangesPerTick` throttles how many bots change state per tick.
+  Events are sized from the zone row only; nearby real players (mod-playerbots' BotActiveAlone
+  rules, `PlayerPresent`) affect only start priority. A watched duel ground winds down one bot at a
+  time past its timer (`StartWindDown`/`UpdateWindDown`, `Participant::LeaveAt` lingerers,
+  `PvPLife.Duel.WindDown.*`), then stays quiet a random while (`_duelQuietUntil`).
 - `src/PvPLifeTypes.h`: the plain data structs (`Zone`, `ActiveEvent`, `Participant`, queue steps)
   and enums.
 - `src/LifeBotReservation.h`: header-only, process-wide registry shared with sibling "Life" modules

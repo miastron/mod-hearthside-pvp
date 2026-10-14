@@ -57,7 +57,9 @@ namespace PvPLife
 
         // Public Hook & Participant Interface
         bool IsParticipant(uint32 guidLow) const;
-        void DisengageParticipant(uint32 guidLow);
+        // returnHome: the bot walks off (watched) or goes back where it was borrowed from, as at an
+        // event's end; otherwise it is let go where it stands.
+        void DisengageParticipant(uint32 guidLow, bool returnHome = false);
         void OnPlayerLogout(Player* player);
         void OnAddGroupMember(uint32 guidLow);
         // PlayerScript/GroupScript hooks can fire on map-update threads (a bot's own AI logs it out
@@ -224,7 +226,29 @@ namespace PvPLife
         float Jitter() const;
         uint32 GetLiveWorldBotCount() const;
         uint32 CalculatePopulationBudget() const;
-        void CalculatePopulation(Zone const& zone, uint32& attackerCount, uint32& defenderCount) const;
+        // budgetShort: set when the shared budget, not the zone row, limited the count.
+        void CalculatePopulation(Zone const& zone, uint32& attackerCount, uint32& defenderCount,
+            bool* budgetShort = nullptr) const;
+        // mod-playerbots' BotActiveAlone wake rule for this spot: a real player on its map in the same
+        // zone (ForceWhenInZone), anywhere on the map (ForceWhenInMap) or within ForceWhenInRadius.
+        // Bots there are awake, so spots near a player get the budget first.
+        bool PlayerPresent(Zone const& zone) const;
+
+        // Duel-ground wind-down: at the timer a watched ground lets one idle bot go every
+        // IntervalMin-Max seconds; the partner it leaves lingers LingerMin-Max seconds and then
+        // goes too, until nobody is left or MaxSeconds pass.
+        bool CanWindDown(ActiveEvent const& event) const;
+        void StartWindDown(ActiveEvent& event, uint32 now);
+        void UpdateWindDown(ActiveEvent& event, uint32 now);
+        // Lets go of a member mod-playerbots took into a battleground or dungeon (its partner starts
+        // lingering, as if it had walked off) and of each lingering member whose time is up.
+        void ReleaseLeavers(ActiveEvent& event, uint32 now);
+        // The partner `departingGuid` leaves behind (same staging pair) starts lingering.
+        void StartLinger(ActiveEvent& event, Participant const& departing, uint32 now);
+        // Not dueling, about to duel, fighting, moving off or mid-antic: free to leave now.
+        bool DuelIdle(Player* bot, uint32 guidLow) const;
+        // A duelist waiting long without a duel rolls once for boredom (more antics).
+        void RollBoredom(uint32 guidLow);
 
         void AuditLog(std::string const& tag, std::string const& text) const;
         std::string RandomChatLine(ActivityType type, ChatChannel channel, TeamSide speakerTeam);
@@ -316,6 +340,27 @@ namespace PvPLife
         uint32 _botChallengeCooldownSeconds = 180;
         uint32 _botDuelCooldownSeconds = 45;
         uint32 _botDuelMaxLevelDifference = 2;
+        // Wind-down (PvPLife.Duel.WindDown.*): a watched duel ground empties one bot at a time.
+        bool _windDownEnable = true;
+        uint32 _windDownIntervalMin = 30;
+        uint32 _windDownIntervalMax = 150;
+        uint32 _windDownLingerMin = 60;
+        uint32 _windDownLingerMax = 300;
+        uint32 _windDownMaxSeconds = 900;
+        // A duel ground that emptied stays quiet this long (PvPLife.Duel.QuietMin/MaxSeconds).
+        uint32 _duelQuietMin = 30;
+        uint32 _duelQuietMax = 1200;
+        std::unordered_map<uint32, uint32> _duelQuietUntil; // zone id -> game time
+        // Bored duelists (PvPLife.Duel.Bored.*) do antics this many times as often. Value 0 = rolled
+        // and not bored; no entry = not rolled yet.
+        uint32 _boredChance = 35;
+        uint32 _boredAfterSeconds = 240;
+        uint32 _boredMultiplierMin = 2;
+        uint32 _boredMultiplierMax = 4;
+        std::unordered_map<uint32, uint32> _boredom;
+        std::unordered_map<uint32, uint32> _lastDuelAt; // bot guid -> game time its last duel began
+        // While a spot near a real player is waiting for budget, spots nobody is near do not start.
+        uint32 _presenceWaitingUntil = 0;
         uint32 _duelMatchup[3][3] = { { 100, 70, 10 }, { 70, 25, 0 }, { 10, 0, 5 } }; // [DuelRole][DuelRole], %
         bool _footworkDuels = true;
         bool _footworkWorldPvp = true;
@@ -382,9 +427,6 @@ namespace PvPLife
         uint32 _fixedCount = 100;
         uint32 _borrowPercent = 10;
         uint32 _maxTotal = 120;
-        DemandMode _demandMode = DemandMode::Hybrid;
-        uint32 _baselinePercent = 20;
-        uint32 _burstGraceSeconds = 180;
         uint32 _maxChangesPerTick = 3;
         uint32 _changesThisTick = 0;
         bool _proportionalZoneScaling = true;
@@ -438,7 +480,6 @@ namespace PvPLife
         std::unordered_map<uint16, std::vector<BotCandidate>> _offlineCandidateCache; // keyed by OfflineCacheKey
         std::unordered_map<uint16, uint32> _offlineCandidateRefresh;
         std::unordered_set<uint16> _offlineCandidateQueries;
-        mutable std::unordered_map<uint32, uint32> _zoneLastRealPlayerTime;
         uint32 _lastCooldownPruneTime = 0;
         void PruneExpiredCooldowns();
 
@@ -459,6 +500,7 @@ namespace PvPLife
             bool InCombat = false;
             bool HasDuel = false;
             bool IsGameMaster = false;
+            bool HiddenGm = false; // a GM out of sight wakes no bots in mod-playerbots, so it is no presence here
             uint32 Security = 0;
             bool IsGroupLeader = false;
             uint32 GroupMembersCount = 0;

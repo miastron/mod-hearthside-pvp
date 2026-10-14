@@ -41,13 +41,6 @@ namespace PvPLife
         Percentage = 1
     };
 
-    enum class DemandMode : uint8
-    {
-        Fixed = 0,
-        Dynamic = 1,
-        Hybrid = 2
-    };
-
     enum class EventOrigin : uint8
     {
         Zone = 0,
@@ -152,6 +145,8 @@ namespace PvPLife
         bool Deployed = false;
         uint64 DuelArbiter = 0;
         uint32 DuelOpponentGuid = 0;
+        // Left behind by its partner: leaves once idle at or after this game time (0 = not lingering).
+        uint32 LeaveAt = 0;
     };
 
     enum class DuelPairState : uint8
@@ -193,6 +188,10 @@ namespace PvPLife
         uint32 RequiredDefenders = 0;
         uint32 MinimumTotal = 1;
         bool Closing = false;
+        // Past its timer and emptying one bot at a time (duel grounds). EndsAt then holds the
+        // wind-down's hard cap, so steps still run until it.
+        bool WindingDown = false;
+        uint32 NextDepartureAt = 0;
     };
 
     struct MoveStep

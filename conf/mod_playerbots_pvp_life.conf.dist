@@ -403,6 +403,49 @@ PvPLife.Duel.IdleFidget.MinSeconds = 6
 PvPLife.Duel.IdleFidget.MaxSeconds = 20
 
 #
+#   PvPLife.Duel.WindDown.Enable / IntervalMinSeconds / IntervalMaxSeconds / LingerMinSeconds /
+#   LingerMaxSeconds / MaxSeconds
+#       Description: When a duel ground's time is up and a real player is near (mod-playerbots'
+#                    BotActiveAlone rules), the bots leave one at a time instead of all at once: every
+#                    IntervalMin-Max seconds an idle one (never one mid-duel) walks off and mod-playerbots
+#                    takes it back, preferring one whose partner is still there. The partner it leaves
+#                    lingers LingerMin-Max seconds (idling, watching, healing, maybe dueling someone else
+#                    left over) and then goes too. A bot mod-playerbots takes into a battleground or
+#                    dungeon mid-event counts as leaving, and its partner lingers the same way. Whatever
+#                    is left after MaxSeconds goes at once; with nobody near, everyone goes at once.
+#       Default:     1 (Enabled), 30, 150, 60, 300, 900
+#
+PvPLife.Duel.WindDown.Enable = 1
+PvPLife.Duel.WindDown.IntervalMinSeconds = 30
+PvPLife.Duel.WindDown.IntervalMaxSeconds = 150
+PvPLife.Duel.WindDown.LingerMinSeconds = 60
+PvPLife.Duel.WindDown.LingerMaxSeconds = 300
+PvPLife.Duel.WindDown.MaxSeconds = 900
+
+#
+#   PvPLife.Duel.QuietMinSeconds / QuietMaxSeconds
+#       Description: Once a duel ground has emptied, it stays quiet a random QuietMin-Max seconds before
+#                    PvPLife.Duel.AlwaysActive starts it again: sometimes right away, sometimes a while.
+#                    Not applied after a config reload, a GM stop or a shutdown.
+#       Default:     30, 1200
+#
+PvPLife.Duel.QuietMinSeconds = 30
+PvPLife.Duel.QuietMaxSeconds = 1200
+
+#
+#   PvPLife.Duel.Bored.Chance / AfterSeconds / MultiplierMin / MultiplierMax
+#       Description: A duelist that has gone AfterSeconds without a duel, or that was just left behind
+#                    by its partner, rolls once at Chance% to turn restless: its antics come
+#                    MultiplierMin-Max times as often (PvPLife.Antics.ChancePerMinute, capped at 100) with
+#                    that fraction of PvPLife.Antics.CooldownSeconds between them. Its next duel calms it.
+#       Default:     35, 240, 2, 4
+#
+PvPLife.Duel.Bored.Chance = 35
+PvPLife.Duel.Bored.AfterSeconds = 240
+PvPLife.Duel.Bored.MultiplierMin = 2
+PvPLife.Duel.Bored.MultiplierMax = 4
+
+#
 #   PvPLife.DuelMedics.Enable / MedicPercent / Chance / MaxPerDuel / Radius
 #       Description: An idle healer duelist (Holy/Discipline priest, Holy paladin, Restoration shaman or
 #                    druid) now and then heals the duelists of a duel that just ended in front of it, real
@@ -655,17 +698,18 @@ PvPLife.Population.BudgetMode = "percentage"
 PvPLife.Population.FixedCount = 100
 PvPLife.Population.BorrowPercent = 10
 
-# Global ceiling across all PvP activities combined.
-# Set to 0 for uncapped dynamic mode (budget scales purely with live world bots * BorrowPercent).
+# Global ceiling across all PvP activities combined. The budget is the smaller of BorrowPercent of the
+# live bots (or FixedCount) and MaxTotal, so above MaxTotal * 100 / BorrowPercent live bots only
+# MaxTotal matters. Set to 0 for no ceiling (budget scales purely with live world bots * BorrowPercent).
 # Tuned conservatively to 120 max total bots across all activities on a 1,000-bot server.
+#
+# Events are sized from their zone rows whether or not a real player is near: an event nobody is near
+# is prepared in full and stays dormant until mod-playerbots wakes its bots (Playerbots.BotActiveAlone
+# and its ForceWhenInZone / ForceWhenInRadius / ForceWhenInMap rules). Those same rules decide
+# priority: a spot near a real player that cannot start for lack of budget holds off the spots nobody
+# is near until it has its bots. (DemandMode, BaselinePercent and BurstGraceSeconds are gone.)
 PvPLife.Population.MaxTotal = 120
 
-# DemandMode: "fixed" = zone populations ignore where real players are; "dynamic" = a zone only starts
-# when a real player (not a GM) was in it within BurstGraceSeconds; "hybrid" = it starts anyway, at
-# BaselinePercent of its population, when no real player was there. Any other value is read as "hybrid".
-PvPLife.Population.DemandMode = "hybrid"
-PvPLife.Population.BaselinePercent = 20
-PvPLife.Population.BurstGraceSeconds = 180
 PvPLife.Population.MaxChangesPerTick = 3
 
 # Proportional Zone & Skirmish Scaling:
