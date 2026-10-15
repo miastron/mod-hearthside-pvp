@@ -7,6 +7,7 @@
 #include "PvPLifeMgr.h"
 #include "../../mod-hearthside-life/src/LifeBotReservation.h"
 
+#include "AllSpellScript.h"
 #include "Chat.h"
 #include "CommandScript.h"
 #include "Group.h"
@@ -16,6 +17,7 @@
 #include "PlayerbotAI.h"
 #include "PlayerScript.h"
 #include "ScriptMgr.h"
+#include "Spell.h"
 #include "WorldScript.h"
 
 using namespace Acore::ChatCommands;
@@ -102,6 +104,23 @@ public:
     }
 };
 
+class PvPLifeSpellScript : public AllSpellScript
+{
+public:
+    PvPLifeSpellScript()
+        : AllSpellScript("PvPLifeSpellScript", { ALLSPELLHOOK_ON_SPELL_CHECK_CAST })
+    {
+    }
+
+    void OnSpellCheckCast(Spell* spell, bool /*strict*/, SpellCastResult& res) override
+    {
+        if (res != SPELL_CAST_OK || !spell->GetCaster())
+            return;
+        if (sPvPLifeMgr.HoldBattlegroundMount(spell->GetCaster()->ToPlayer(), spell->GetSpellInfo()))
+            res = SPELL_FAILED_NOT_READY;
+    }
+};
+
 class PvPLifeCommandScript : public CommandScript
 {
 public:
@@ -142,6 +161,7 @@ void AddPvPLifeScripts()
     new PvPLifeWorldScript();
     new PvPLifePlayerScript();
     new PvPLifeGroupScript();
+    new PvPLifeSpellScript();
     new PvPLifeCommandScript();
     LOG_INFO("server.loading", ">> Loaded mod-playerbots-pvp-life (protocol={}, registry={:p})",
         PlayerbotsLife::GetReservationProtocolVersion(), PlayerbotsLife::GetReservationRegistryAddress());

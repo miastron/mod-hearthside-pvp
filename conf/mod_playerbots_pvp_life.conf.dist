@@ -753,6 +753,23 @@ PvPLife.Population.MaxChangesPerTick = 3
 PvPLife.Population.ProportionalZoneScaling = 1
 
 ###################################################################################################
+# Battleground Start
+###################################################################################################
+
+#
+#   PvPLife.Battleground.MountStagger.Enable / Seconds
+#       Description: mod-playerbots mounts every bot waiting at a battleground's gate the moment the
+#                    start countdown passes 30 seconds, all on the same tick. With this on, each bot
+#                    is held off until its own moment, spread over the Seconds that follow (26: from
+#                    0:30 down to 0:04). The moment is fixed per bot and match. Only bots run by their
+#                    own AI are held, never a person, a SelfBot or a player's alt bot. Works whether
+#                    or not PvPLife.Enable is on; 0 Seconds is the same as off.
+#       Default:     1 (Enabled), 26 (max 29)
+#
+PvPLife.Battleground.MountStagger.Enable = 1
+PvPLife.Battleground.MountStagger.Seconds = 26
+
+###################################################################################################
 # Asynchronous Audit Logger
 ###################################################################################################
 

@@ -33,6 +33,7 @@ class ChatHandler;
 class Player;
 class Unit;
 class Field;
+class SpellInfo;
 
 namespace PvPLife
 {
@@ -75,6 +76,11 @@ namespace PvPLife
         // PlayerScript::OnPlayerDuelEnd, any duel won anywhere (map-update threads): queued for the
         // duel medics, handled on the world thread.
         void QueueDuelEnd(Player* winner, Player* loser);
+        // AllSpellScript::OnSpellCheckCast, any spell cast anywhere (map-update threads): true while a
+        // bot waiting at a battleground's gate is not to mount yet. mod-playerbots mounts every bot the
+        // moment the start countdown passes 30 s; held off, each tries again until its own moment
+        // (PvPLife.Battleground.MountStagger.*). Reads config only.
+        bool HoldBattlegroundMount(Player* player, SpellInfo const* spell) const;
 
     private:
         void ProcessQueuedDisengages();
@@ -371,6 +377,10 @@ namespace PvPLife
         uint32 _windDownLingerMin = 60;
         uint32 _windDownLingerMax = 300;
         uint32 _windDownMaxSeconds = 900;
+        // Battleground start (PvPLife.Battleground.MountStagger.*): bots mount over this many seconds
+        // before the gates open instead of all at 30 s.
+        bool _bgMountStaggerEnable = true;
+        uint32 _bgMountStaggerSeconds = 26;
         // A duel ground that emptied stays quiet this long (PvPLife.Duel.QuietMin/MaxSeconds).
         uint32 _duelQuietMin = 30;
         uint32 _duelQuietMax = 1200;

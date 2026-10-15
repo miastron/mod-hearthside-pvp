@@ -413,6 +413,8 @@ namespace PvPLife
         _windDownLingerMin = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.WindDown.LingerMinSeconds", 60), 0, 3600);
         _windDownLingerMax = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.WindDown.LingerMaxSeconds", 300), _windDownLingerMin, 3600);
         _windDownMaxSeconds = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.WindDown.MaxSeconds", 900), 60, 7200);
+        _bgMountStaggerEnable = sConfigMgr->GetOption<bool>("PvPLife.Battleground.MountStagger.Enable", true);
+        _bgMountStaggerSeconds = std::min<uint32>(29, sConfigMgr->GetOption<uint32>("PvPLife.Battleground.MountStagger.Seconds", 26));
         _duelQuietMin = std::min<uint32>(MaxCooldownSeconds, sConfigMgr->GetOption<uint32>("PvPLife.Duel.QuietMinSeconds", 30));
         _duelQuietMax = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Duel.QuietMaxSeconds", 1200), _duelQuietMin, MaxCooldownSeconds);
         _boredChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Duel.Bored.Chance", 35));
@@ -1945,6 +1947,26 @@ namespace PvPLife
         else if (!settling)
             bot->SetFacingTo(Position::NormalizeOrientation(bot->GetOrientation() + (urand(0, 1) ? 1.0f : -1.0f) * frand(0.4f, 1.6f)));
         return true;
+    }
+
+    bool Manager::HoldBattlegroundMount(Player* player, SpellInfo const* spell) const
+    {
+        if (!_bgMountStaggerEnable || !_bgMountStaggerSeconds || !player || !spell || !player->InBattleground() ||
+            !spell->HasAura(SPELL_AURA_MOUNTED))
+            return false;
+        Battleground* bg = player->GetBattleground();
+        if (!bg || bg->GetStatus() != STATUS_WAIT_JOIN)
+            return false;
+        // The bot's own AI in charge, nobody else: a person, a SelfBot or a player's alt bot mounts when
+        // they like. Not IsBotSession: its account cache belongs to the world thread.
+        PlayerbotAI* ai = GET_PLAYERBOT_AI(player);
+        if (!ai || ::IsRealPlayer(player) || ::IsSelfBot(player) || ai->HasGameClientMaster())
+            return false;
+        // Each bot its own moment, the same for the whole countdown and different the next match.
+        uint32 seed = (player->GetGUID().GetCounter() ^ (bg->GetInstanceID() * 0x9E3779B9u)) * 2654435761u;
+        seed ^= seed >> 15;
+        int32 mountAt = int32(BG_START_DELAY_30S) - int32(seed % (_bgMountStaggerSeconds * IN_MILLISECONDS));
+        return bg->GetStartDelayTime() > mountAt;
     }
 
     void Manager::QueueDuelEnd(Player* winner, Player* loser)
@@ -4815,6 +4837,9 @@ namespace PvPLife
             _windDownMaxSeconds, _duelQuietMin, _duelQuietMax, _boredChance, _boredAfterSeconds,
             _boredMultiplierMin, _boredMultiplierMax,
             std::count_if(_boredom.begin(), _boredom.end(), [](auto const& entry) { return entry.second > 1; }));
+
+        handler->PSendSysMessage("Battleground mount stagger: enabled={} over the last {}s before 0:30",
+            _bgMountStaggerEnable ? 1 : 0, _bgMountStaggerSeconds);
 
         handler->PSendSysMessage("Audit: linesWritten={} dropped={} openFailures={} writeFailures={} inQueue={}",
             sPvPLifeAudit.GetLinesWritten(), sPvPLifeAudit.GetDroppedCount(),
