@@ -474,7 +474,7 @@ PvPLife.DuelMedics.Radius = 30
 #                    only reposition through a window (Frost Nova, Fear, Psychic Scream, Wing Clip...) or an
 #                    escape (Blink, Disengage); hunters keep out of the dead zone; melee use gap-closers
 #                    (Charge, Intercept, Shadowstep, Death Grip, Feral Charge), rogues and cats get behind,
-#                    and melee circle their target. Never during a cast or a stun/root/fear. In a duel no
+#                    and melee circle, juke and stutter-step. Never during a cast or a stun/root/fear. In a duel no
 #                    move leaves 38 yards of the duel flag (out of bounds is 50), and a bot near the edge
 #                    steps back in first. Duels = duel zones; WorldPvP = skirmishes and faction campaigns.
 #       Default:     1, 1 (Enabled)
@@ -515,6 +515,24 @@ PvPLife.Footwork.DuelPrep = 1
 #
 PvPLife.Footwork.IntervalMinMs = 1000
 PvPLife.Footwork.IntervalMaxMs = 2500
+
+#
+#   PvPLife.Footwork.Melee.IntervalMinMs / IntervalMaxMs
+#       Description: The same delay for melee specs, which move more than casters: a player in melee
+#                    range keeps circling, juking through to the far side and stepping in and out.
+#       Default:     600, 1400
+#
+PvPLife.Footwork.Melee.IntervalMinMs = 600
+PvPLife.Footwork.Melee.IntervalMaxMs = 1400
+
+#
+#   PvPLife.Footwork.Melee.HoldChance
+#       Description: Percent of a melee bot's decisions in reach of its target where it holds its ground
+#                    (0-100); otherwise it circles, juke-steps through to the target's far side, or steps
+#                    out and back, each still within melee range.
+#       Default:     10
+#
+PvPLife.Footwork.Melee.HoldChance = 10
 
 #
 #   PvPLife.Footwork.JumpChance

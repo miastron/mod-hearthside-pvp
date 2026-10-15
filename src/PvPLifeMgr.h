@@ -393,6 +393,9 @@ namespace PvPLife
         bool _footworkDuelPrep = true;
         uint32 _footworkIntervalMinMs = 1000;
         uint32 _footworkIntervalMaxMs = 2500;
+        uint32 _footworkMeleeIntervalMinMs = 600;
+        uint32 _footworkMeleeIntervalMaxMs = 1400;
+        uint32 _footworkMeleeHoldChance = 10;
         uint32 _footworkJumpChance = 35;
         std::unordered_map<uint32, uint64> _footworkNextMs;
         LifeMotion::AnticConfig _antics;

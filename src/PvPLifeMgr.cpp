@@ -366,6 +366,9 @@ namespace PvPLife
         _footworkBattlegrounds = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Battlegrounds", false);
         _footworkIntervalMinMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMinMs", 1000), 500, 30000);
         _footworkIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.IntervalMaxMs", 2500), _footworkIntervalMinMs, 60000);
+        _footworkMeleeIntervalMinMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.Melee.IntervalMinMs", 600), 300, 30000);
+        _footworkMeleeIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.Melee.IntervalMaxMs", 1400), _footworkMeleeIntervalMinMs, 60000);
+        _footworkMeleeHoldChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.Melee.HoldChance", 10));
         _footworkJumpChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.JumpChance", 35));
         _footworkTrace = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Trace", false);
         _footworkDuelPrep = sConfigMgr->GetOption<bool>("PvPLife.Footwork.DuelPrep", true);
@@ -1677,7 +1680,9 @@ namespace PvPLife
         uint64& next = _footworkNextMs[bot->GetGUID().GetCounter()];
         if (next > now)
             return;
-        next = now + urand(_footworkIntervalMinMs, _footworkIntervalMaxMs);
+        bool melee = FootworkProfileFor(bot->getClass(), AiFactory::GetPlayerSpecTab(bot)).MinRange <= 0.0f;
+        next = now + (melee ? urand(_footworkMeleeIntervalMinMs, _footworkMeleeIntervalMaxMs)
+                            : urand(_footworkIntervalMinMs, _footworkIntervalMaxMs));
         // Never cut a cast short, and leave control effects and mounts alone.
         char const* outcome = nullptr;
         if (!bot->IsAlive() || !opponent->IsAlive())
@@ -2353,9 +2358,23 @@ namespace PvPLife
             return FootworkStep(bot, opponent, opponent->GetOrientation() + float(M_PI) + frand(-0.5f, 0.5f), frand(1.5f, 2.5f), them, jump, bound)
                 ? "melee:behind" : "melee:behind-blocked";
         }
-        if (urand(1, 100) > 80)
+        if (urand(1, 100) <= _footworkMeleeHoldChance)
             return "melee:hold";
-        return FootworkStep(bot, opponent, away + side * frand(0.6f, 1.3f), frand(1.5f, 3.0f), them, jump, bound) // circle
+        // Every move lands within 4 yards of the target, inside melee range (5 yards centre to centre)
+        // and mod-playerbots' own reach, so its AI never walks the bot back in afterwards.
+        uint32 roll = urand(1, 100);
+        if (roll <= 20 && !profile.WantsBehind) // a juke: round (or over) the target to its far side
+        {
+            return FootworkStep(bot, opponent, away + float(M_PI) + frand(-0.6f, 0.6f), frand(2.0f, 3.5f), them, jump, bound)
+                ? "melee:juke" : "melee:juke-blocked";
+        }
+        if (roll <= 35) // a player's stutter step: back out a yard or two, still in reach
+        {
+            return FootworkStep(bot, opponent, away + frand(-0.5f, 0.5f), std::min(distance + frand(1.0f, 2.0f), 4.0f), them, jump, bound)
+                ? "melee:step-out" : "melee:step-out-blocked";
+        }
+        float arc = profile.WantsBehind ? frand(0.4f, 0.9f) : frand(0.7f, 1.6f); // a rogue keeps to the rear
+        return FootworkStep(bot, opponent, away + side * arc, frand(1.5f, 3.5f), them, jump, bound) // circle
             ? "melee:circle" : "melee:circle-blocked";
     }
 
