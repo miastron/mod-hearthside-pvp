@@ -52,7 +52,7 @@ VALUES
 -- Duel zones: intentionally level 1-80. PvP Life runs all duels; City Life only places spectators at
 -- these three spots. Goldshire is a busy town square, so it holds at most two pairs and does not
 -- challenge real players (many there are new characters).
-('StormwindDuel',1,1,0,0,1,80,0, -9122.49,350.862,93.7893,4.19046, -9122.49,350.862,93.7893,4.19046, 2,4,2,4,20,40,220,30,0,1,0),
+('StormwindDuel',1,1,0,0,1,80,0, -9098.9,336.604,94.4251,0.939885, -9098.9,336.604,94.4251,0.939885, 2,4,2,4,20,40,220,30,0,1,0),
 ('OrgrimmarDuel',1,1,1,1,1,80,1, 1282.04,-4395.88,26.3002,3.63561, 1282.04,-4395.88,26.3002,3.63561, 2,4,2,4,20,40,220,30,0,1,0),
 ('GoldshireDuel',1,1,0,0,1,80,0, -9456.63,80.21,56.50,1.25, -9456.63,80.21,56.50,1.25, 1,2,1,2,20,40,120,60,0,0,0),
 
@@ -128,6 +128,13 @@ UPDATE `pvp_life_zone` SET `attackers_min`=3,`attackers_max`=7,`defenders_min`=3
   WHERE `name`='ForTheHorde_Stormwind' AND `attackers_min`=6 AND `attackers_max`=14 AND `defenders_min`=6 AND `defenders_max`=14;
 UPDATE `pvp_life_zone` SET `attackers_min`=3,`attackers_max`=7,`defenders_min`=3,`defenders_max`=7
   WHERE `name`='ForTheAlliance_Orgrimmar' AND `attackers_min`=6 AND `attackers_max`=14 AND `defenders_min`=6 AND `defenders_max`=14;
+
+-- Stormwind's duel ground moved off the road onto the grass (realm 2026-10-15, .tele sw_duel_area).
+-- Only a row still on the previous seed point moves, so a GM's .pvplife zone rally/target stands.
+UPDATE `pvp_life_zone` SET `rally_x`=-9098.9,`rally_y`=336.604,`rally_z`=94.4251,`rally_o`=0.939885,
+  `target_x`=-9098.9,`target_y`=336.604,`target_z`=94.4251,`target_o`=0.939885
+  WHERE `name`='StormwindDuel' AND ABS(`rally_x`+9122.49)<0.05 AND ABS(`rally_y`-350.862)<0.05
+    AND ABS(`target_x`+9122.49)<0.05 AND ABS(`target_y`-350.862)<0.05;
 
 -- GM command help for the legacy .wpvp root. Only `wpvp` itself is a registered command (its
 -- subcommands are parsed by the module), so the core skips any `wpvp ...` row with an error on
