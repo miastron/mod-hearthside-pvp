@@ -1458,7 +1458,7 @@ namespace PvPLife
             player->TeleportTo(mapId, x, y, z, o);
         }
         else
-            player->GetMotionMaster()->MovePoint(0, x, y, z);
+            LifeMotion::WalkTo(player, x, y, z);
     }
 
     void Manager::WalkBot(Player* player, uint32 mapId, float x, float y, float z)
@@ -1473,7 +1473,7 @@ namespace PvPLife
         // Already on its way: the leash re-checks every GuardIntervalMs and must not restart the walk.
         if (player->isMoving() && player->GetMotionMaster()->GetCurrentMovementGeneratorType() == POINT_MOTION_TYPE)
             return;
-        player->GetMotionMaster()->MovePoint(0, x, y, z);
+        LifeMotion::WalkTo(player, x, y, z);
     }
 
     bool Manager::BotActive(Player* bot) const
@@ -1528,19 +1528,14 @@ namespace PvPLife
                 it = _pendingWalks.erase(it);
                 continue;
             }
-            // Ride the rest of the way. The mount action picks a flying mount where the zone allows one.
+            // Ride the rest of the way, on a ground mount: a flying one crosses the ground in straight
+            // lines and leaves the bot its fly flags.
             if (!walk.MountTried && !bot->IsMounted() && bot->GetExactDist2d(walk.X, walk.Y) > MountUpDistance)
             {
                 walk.MountTried = true;
-                if (PlayerbotAI* ai = GET_PLAYERBOT_AI(bot))
-                {
-                    bool hadMount = ai->HasStrategy("mount", BOT_STATE_NON_COMBAT);
-                    if (!hadMount)
-                        ai->ChangeStrategy("+mount", BOT_STATE_NON_COMBAT);
-                    ai->DoSpecificAction("check mount state", Event(), true);
-                    if (!hadMount)
-                        ai->ChangeStrategy("-mount", BOT_STATE_NON_COMBAT);
-                }
+                if (bot->IsOutdoors() && !bot->IsInCombat() && !bot->IsInWater() && !bot->GetMap()->Instanceable())
+                    if (uint32 mount = LifeMotion::GroundMountSpell(bot))
+                        bot->CastSpell(bot, mount, false);
                 if (bot->IsNonMeleeSpellCast(false))
                 {
                     walk.DueMs = now + 1800; // let the mount cast finish before moving
@@ -1695,7 +1690,7 @@ namespace PvPLife
         {
             // Fighting a player while mounted: get off (the duel-start dismount misses a bot
             // remounted by its own AI, and world PvP has no start to hook).
-            bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+            LifeMotion::Dismount(bot);
             outcome = "dismount";
         }
         else if (bot->IsFalling() || bot->IsInWater() || bot->HasUnitState(UNIT_STATE_JUMPING | UNIT_STATE_CHARGING))
@@ -2025,11 +2020,7 @@ namespace PvPLife
                 // Whatever the defaults already started: stop it (UpdateDuelPrep makes the countdown moves).
                 if (bot->duel->State == DUEL_STATE_COUNTDOWN)
                 {
-                    if (bot->IsMounted() || bot->HasMountedAura())
-                    {
-                        bot->Dismount();
-                        bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
-                    }
+                    LifeMotion::Dismount(bot);
                     auto prep = _duelPrep.find(participant.Bot.GuidLow);
                     if (bot->isMoving() && (prep == _duelPrep.end() || !prep->second.Moved)) // not its own countdown move
                     {
@@ -2090,8 +2081,7 @@ namespace PvPLife
                 }
                 if (bot->IsMounted() || bot->HasMountedAura())
                 {
-                    bot->Dismount();
-                    bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+                    LifeMotion::Dismount(bot);
                     continue;
                 }
                 if (prep.FaceAtMs && now >= prep.FaceAtMs)
@@ -3719,7 +3709,7 @@ namespace PvPLife
                         PositionMap& positions = ai->GetAiObjectContext()->GetValue<PositionMap&>("position")->Get();
                         positions["stay"].Set(x, y, z, challenger->GetMapId());
                     }
-                    challenger->GetMotionMaster()->MovePoint(0, x, y, z);
+                    LifeMotion::WalkTo(challenger, x, y, z);
                     retry.ExecuteAt = now + 3;
                     keep.push_back(retry);
                 }
@@ -4015,7 +4005,7 @@ namespace PvPLife
                 if (_dismountOnArrival.count(participant.Bot.GuidLow) &&
                     bot->GetDistance2d(participant.ActivityX, participant.ActivityY) <= 6.0f)
                 {
-                    bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+                    LifeMotion::Dismount(bot);
                     _dismountOnArrival.erase(participant.Bot.GuidLow);
                 }
 
