@@ -535,6 +535,24 @@ PvPLife.Footwork.Melee.IntervalMaxMs = 1400
 PvPLife.Footwork.Melee.HoldChance = 10
 
 #
+#   PvPLife.Footwork.Hunter.IntervalMinMs / IntervalMaxMs
+#       Description: The same delay for hunters: between casters and melee. Auto Shot pauses while
+#                    moving, but a hunter's instants do not, so a player keeps shuffling between shots.
+#       Default:     800, 1800
+#
+PvPLife.Footwork.Hunter.IntervalMinMs = 800
+PvPLife.Footwork.Hunter.IntervalMaxMs = 1800
+
+#
+#   PvPLife.Footwork.Hunter.HoldChance
+#       Description: Percent of a hunter's decisions in its range band where it stands and shoots
+#                    (0-100); otherwise it strafes, shifts a few yards, or (target near or held) backs
+#                    off toward the far edge of the band. The dead-zone rules are unchanged.
+#       Default:     35
+#
+PvPLife.Footwork.Hunter.HoldChance = 35
+
+#
 #   PvPLife.Footwork.JumpChance
 #       Description: Percent of footwork moves made as a jump (0-100).
 #       Default:     35

@@ -369,6 +369,9 @@ namespace PvPLife
         _footworkMeleeIntervalMinMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.Melee.IntervalMinMs", 600), 300, 30000);
         _footworkMeleeIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.Melee.IntervalMaxMs", 1400), _footworkMeleeIntervalMinMs, 60000);
         _footworkMeleeHoldChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.Melee.HoldChance", 10));
+        _footworkHunterIntervalMinMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.Hunter.IntervalMinMs", 800), 300, 30000);
+        _footworkHunterIntervalMaxMs = std::clamp<uint32>(sConfigMgr->GetOption<uint32>("PvPLife.Footwork.Hunter.IntervalMaxMs", 1800), _footworkHunterIntervalMinMs, 60000);
+        _footworkHunterHoldChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.Hunter.HoldChance", 35));
         _footworkJumpChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("PvPLife.Footwork.JumpChance", 35));
         _footworkTrace = sConfigMgr->GetOption<bool>("PvPLife.Footwork.Trace", false);
         _footworkDuelPrep = sConfigMgr->GetOption<bool>("PvPLife.Footwork.DuelPrep", true);
@@ -1683,8 +1686,12 @@ namespace PvPLife
         if (next > now)
             return;
         bool melee = FootworkProfileFor(bot->getClass(), AiFactory::GetPlayerSpecTab(bot)).MinRange <= 0.0f;
-        next = now + (melee ? urand(_footworkMeleeIntervalMinMs, _footworkMeleeIntervalMaxMs)
-                            : urand(_footworkIntervalMinMs, _footworkIntervalMaxMs));
+        if (melee)
+            next = now + urand(_footworkMeleeIntervalMinMs, _footworkMeleeIntervalMaxMs);
+        else if (bot->getClass() == CLASS_HUNTER)
+            next = now + urand(_footworkHunterIntervalMinMs, _footworkHunterIntervalMaxMs);
+        else
+            next = now + urand(_footworkIntervalMinMs, _footworkIntervalMaxMs);
         // Never cut a cast short, and leave control effects and mounts alone.
         char const* outcome = nullptr;
         if (!bot->IsAlive() || !opponent->IsAlive())
@@ -2348,6 +2355,30 @@ namespace PvPLife
             // In its band: a spec that fights with instants keeps moving, a caster keeps casting.
             if (distance > profile.MaxRange)
                 return "far:ai"; // out of range: the combat AI closes in
+            if (bot->getClass() == CLASS_HUNTER)
+            {
+                // A hunter between shots: Auto Shot pauses while moving, but its instants (Arcane Shot,
+                // Serpent Sting, Concussive Shot) do not, so a player keeps shuffling, strafes, and gives
+                // ground back toward the far edge of the band when the target is near or held.
+                if (urand(1, 100) <= _footworkHunterHoldChance)
+                    return "hunter:shoot";
+                uint32 roll = urand(1, 100);
+                if (roll <= 35 && (controlled || distance < mid))
+                {
+                    return FootworkStep(bot, opponent, away + frand(-0.4f, 0.4f),
+                        std::min(distance + frand(3.0f, 6.0f), profile.MaxRange), them, jump, bound)
+                        ? "hunter:kite" : "hunter:kite-blocked";
+                }
+                if (roll <= 70)
+                {
+                    return FootworkStep(bot, opponent, away + side * frand(4.0f, 8.0f) / distance,
+                        std::clamp(distance + frand(-2.0f, 2.0f), profile.MinRange, profile.MaxRange), them, jump, bound)
+                        ? "hunter:strafe" : "hunter:strafe-blocked";
+                }
+                return FootworkStep(bot, opponent, away + side * frand(2.0f, 4.0f) / distance,
+                    std::clamp(distance + frand(-1.5f, 1.5f), profile.MinRange, profile.MaxRange), them, jump, bound)
+                    ? "hunter:shift" : "hunter:shift-blocked";
+            }
             if (profile.HardCaster)
             {
                 // Between casts a real caster shifts a few yards or hops, then casts again: worth a

@@ -406,6 +406,9 @@ namespace PvPLife
         uint32 _footworkMeleeIntervalMinMs = 600;
         uint32 _footworkMeleeIntervalMaxMs = 1400;
         uint32 _footworkMeleeHoldChance = 10;
+        uint32 _footworkHunterIntervalMinMs = 800;
+        uint32 _footworkHunterIntervalMaxMs = 1800;
+        uint32 _footworkHunterHoldChance = 35;
         uint32 _footworkJumpChance = 35;
         std::unordered_map<uint32, uint64> _footworkNextMs;
         LifeMotion::AnticConfig _antics;
